@@ -1,4 +1,4 @@
-import type { Meta } from './types';
+import type { Meta, Signal } from './types';
 
 type Num = number | null | undefined;
 
@@ -33,10 +33,16 @@ export const fmtDate = (ts: number | null | undefined): string =>
 /** A snapshot is stale when the 6-hourly job has missed at least one run. */
 export const isSnapshotStale = (meta: Meta, now: number, maxAgeH = 8): boolean => now - meta.generated_at > maxAgeH * 3600;
 
+/** "FRESH WALLET · 1.2D OLD · 2 MARKETS" from the insider rule details (I2 age, I3 breadth). */
+export function insiderBadge(s: Signal): string {
+  const detail = (code: string) => s.checks.find((c) => c.code === code)?.detail;
+  return ['FRESH WALLET', detail('I2'), detail('I3')].filter(Boolean).join(' · ');
+}
+
 export const shortWallet = (w: string): string => `${w.slice(0, 6)}…${w.slice(-4)}`;
 
 export function signalsEmptyMessage(meta: Meta): string {
   const c = meta.counts.certified_wallets;
-  if (c === 0) return 'NO CERTIFIED WHALES YET — SCORING NEEDS MORE RESOLVED HISTORY';
-  return `NO SIGNALS · ${c} CERTIFIED WHALE${c === 1 ? '' : 'S'} UNDER WATCH`;
+  if (c === 0) return 'NO INSIDER OR SNIPER ALERTS · WATCHING FOR FRESH-ACCOUNT WHALES';
+  return `NO ALERTS · WATCHING FOR FRESH-ACCOUNT WHALES + ${c} SNIPER${c === 1 ? '' : 'S'}`;
 }

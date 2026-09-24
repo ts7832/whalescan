@@ -66,3 +66,12 @@ describe('tryLive', () => {
     expect(await tryLive(broken)).toBeNull();
   });
 });
+
+describe('insider alerts', () => {
+  it('keeps INSIDER alerts on the board like signals', () => {
+    let s = applyMessage(base(), { type: 'signal', data: sig('i', 'INSIDER', { kind: 'INSIDER' }) });
+    expect(s.signals.map((x) => x.id)).toEqual(['i']);
+    s = applyMessage(s, { type: 'signal_update', data: sig('i', 'STALE', { kind: 'INSIDER' }) });
+    expect(s.signals[0].status).toBe('STALE');
+  });
+});

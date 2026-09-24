@@ -1,7 +1,7 @@
 import type { LiveMessage, Signal, Snapshot } from './types';
 
 const MAX_CONTACTS = 300;
-const OPEN: Signal['status'][] = ['SIGNAL', 'STALE'];
+const OPEN: Signal['status'][] = ['INSIDER', 'SIGNAL', 'STALE'];
 
 const without = (list: Signal[], id: string) => list.filter((x) => x.id !== id);
 const upsertFront = (list: Signal[], s: Signal) => [s, ...without(list, s.id)].slice(0, MAX_CONTACTS);

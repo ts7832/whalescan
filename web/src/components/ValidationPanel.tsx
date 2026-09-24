@@ -27,10 +27,16 @@ export function ValidationPanel({ validation }: { validation: Validation | null 
     );
   }
   const cls = validation.verdict === 'EDGE CONFIRMED' ? 'ok' : validation.verdict === 'EDGE NOT CONFIRMED' ? 'bad' : 'wait';
-  const rows = [['TIER A', validation.groups.A], ['TIER B', validation.groups.B], ['ALL SIGNALS', validation.groups.SIGNALS], ['BASELINE ≥ FLOOR', validation.groups.BASELINE]] as const;
+  const rows = [
+    ...(validation.groups.INSIDER ? [['INSIDER (FRESH)', validation.groups.INSIDER] as const] : []),
+    ['SNIPER TIER A', validation.groups.A], ['SNIPER TIER B', validation.groups.B],
+    ['ALL SNIPER', validation.groups.SIGNALS], ['BASELINE ≥ FLOOR', validation.groups.BASELINE],
+  ] as const;
+  const insiderCls = validation.insider_verdict === 'EDGE CONFIRMED' ? 'ok' : validation.insider_verdict === 'EDGE NOT CONFIRMED' ? 'bad' : 'wait';
   return (
     <Panel code="05" title="VALIDATION" className="area-validation" right={`WALK-FORWARD · ${fmtDate(validation.generated_at)}`}>
-      <div className={`verdict ${cls}`}>{validation.verdict}</div>
+      {validation.insider_verdict && <div className={`verdict ${insiderCls}`}>INSIDERS: {validation.insider_verdict}</div>}
+      <div className={`verdict ${cls}`}>SNIPERS: {validation.verdict}</div>
       <table>
         <thead>
           <tr><th>GROUP</th><th className="num">N</th><th className="num" title="Mean return per share bought, in cents">RET/SH</th><th className="num">HIT</th><th className="num">T</th></tr>

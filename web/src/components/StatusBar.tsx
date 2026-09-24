@@ -22,9 +22,10 @@ export function StatusBar({ meta, now, linkUp }: { meta: Meta; now: number; link
             ● {meta.mode} · {fmtUtc(meta.generated_at)} · {fmtAge(age)} AGO
           </span>
         )}
+        <span>INSIDERS <b className="violet">{meta.counts.insiders ?? 0}</b></span>
         <span>SCANNED <b>{meta.counts.wallets_scanned}</b></span>
         <span>TESTABLE <b>{meta.counts.testable}</b></span>
-        <span>CERTIFIED <b className="green">{meta.counts.certified_wallets}</b></span>
+        <span>SNIPERS <b className="green">{meta.counts.certified_wallets}</b></span>
         <span>SIGNALS <b className="amber">{meta.counts.signals}</b></span>
         <span>FDR q=<b>{meta.params.bh_q}</b></span>
         {meta.errors.api > 0 && <span className="red">API ERR {meta.errors.api}</span>}

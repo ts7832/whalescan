@@ -1,4 +1,4 @@
-export type Status = 'SIGNAL' | 'STALE' | 'REJECTED' | 'EXIT' | 'CONFLICT' | 'EXPIRED';
+export type Status = 'INSIDER' | 'SIGNAL' | 'STALE' | 'REJECTED' | 'EXIT' | 'CONFLICT' | 'EXPIRED';
 
 export interface Check { code: string; passed: boolean; detail: string }
 
@@ -14,6 +14,8 @@ export interface Quote {
 
 export interface Signal {
   id: string;
+  /** INSIDER = fresh-account big bet (primary signal); SKILL = proven sniper */
+  kind?: 'INSIDER' | 'SKILL';
   status: Status;
   tier: 'A' | 'B' | null;
   category: string;
@@ -73,7 +75,8 @@ export interface Validation {
   generated_at: number;
   verdict: 'INSUFFICIENT DATA' | 'EDGE CONFIRMED' | 'EDGE NOT CONFIRMED';
   folds: { cutoff: number; end: number; signals: number; mean_ret: number | null }[];
-  groups: { A: GroupStats; B: GroupStats; SIGNALS: GroupStats; BASELINE: GroupStats };
+  groups: { A: GroupStats; B: GroupStats; SIGNALS: GroupStats; BASELINE: GroupStats; INSIDER?: GroupStats };
+  insider_verdict?: 'INSUFFICIENT DATA' | 'EDGE CONFIRMED' | 'EDGE NOT CONFIRMED';
   calibration: { lo: number; hi: number; n: number; predicted: number | null; realized: number | null }[];
   params: { fold_days: number; min_history_days: number; slippage: number; n_sims: number };
   caveats: string[];
@@ -85,7 +88,7 @@ export interface Meta {
   mode: 'SNAPSHOT' | 'LIVE';
   counts: {
     wallets_scanned: number; wallets_complete: number; tests: number; testable: number;
-    certified_wallets: number; signals: number; contacts: number;
+    certified_wallets: number; signals: number; contacts: number; insiders?: number;
   };
   params: { bh_q: number; min_usdc: number; conviction_k: number; follow_size_usdc: number; min_net_edge: number; signal_lookback_h: number };
   errors: { api: number; ws_dropped?: number };

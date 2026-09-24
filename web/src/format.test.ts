@@ -33,9 +33,9 @@ describe('format', () => {
   });
 
   it('explains an empty signal board', () => {
-    expect(signalsEmptyMessage(meta(0))).toMatch(/NO CERTIFIED WHALES YET/);
-    expect(signalsEmptyMessage(meta(3))).toBe('NO SIGNALS · 3 CERTIFIED WHALES UNDER WATCH');
-    expect(signalsEmptyMessage(meta(1))).toBe('NO SIGNALS · 1 CERTIFIED WHALE UNDER WATCH');
+    expect(signalsEmptyMessage(meta(0))).toMatch(/FRESH-ACCOUNT WHALES/);
+    expect(signalsEmptyMessage(meta(3))).toBe('NO ALERTS · WATCHING FOR FRESH-ACCOUNT WHALES + 3 SNIPERS');
+    expect(signalsEmptyMessage(meta(1))).toBe('NO ALERTS · WATCHING FOR FRESH-ACCOUNT WHALES + 1 SNIPER');
   });
 });
 
@@ -53,5 +53,16 @@ describe('dates and staleness', () => {
     const m = meta(1);
     expect(isSnapshotStale({ ...m, generated_at: 0 }, 8 * 3600)).toBe(false);
     expect(isSnapshotStale({ ...m, generated_at: 0 }, 8 * 3600 + 1)).toBe(true);
+  });
+});
+
+import { insiderBadge } from './format';
+import type { Signal } from './types';
+
+describe('insider badge', () => {
+  it('summarises account age and breadth from the insider checks', () => {
+    const s = { checks: [{ code: 'I1', passed: true, detail: 'BUY' }, { code: 'I2', passed: true, detail: '1.2D OLD' },
+      { code: 'I3', passed: true, detail: '2 MARKETS' }] } as unknown as Signal;
+    expect(insiderBadge(s)).toBe('FRESH WALLET · 1.2D OLD · 2 MARKETS');
   });
 });
