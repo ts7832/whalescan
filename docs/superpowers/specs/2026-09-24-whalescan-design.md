@@ -205,7 +205,7 @@ Tables: `trades(tx_hash PK, ts, wallet, asset, condition_id, side, price, size, 
 - **Category** from event tags → one of `POLITICS, GEOPOLITICS, SPORTS, CRYPTO, ECONOMY, TECH, CULTURE, OTHER` via an ordered mapping in `config.toml`.
 - **Blocklist** (never scored, never signalled): short-horizon crypto up/down markets (event slug regex `-updown-\d+m-` and similar), markets with < `min_market_volume`.
 - **Wallet flags** (computed from history; flagged wallets are not certifiable):
-  - `MARKET_MAKER`: held both outcomes of the same market in > 30% of markets, or buy/sell volume ratio within 0.8–1.25 across > 50 markets.
+  - `MARKET_MAKER`: held both outcomes of the same market in > 30% of its markets (computed from closed positions; a trade-flow based rule is deferred until live trade history exists per wallet).
   - `FARMER`: > 60% of stake entered at price ≥ 0.95.
   - `LOTTERY`: > 60% of stake entered at price ≤ 0.05.
 
@@ -213,7 +213,7 @@ Tables: `trades(tx_hash PK, ts, wallet, asset, condition_id, side, price, size, 
 
 1. **Universe**: union of leaderboard wallets (several windows) and every wallet with a ≥ $5,000 trade in the last 30 days; capped at `max_wallets` (default 3,000, ordered by volume).
 2. **Positions**: fetch *all* closed positions per wallet (see Part 2 sort caveat). A position counts only if its market is resolved in Gamma (`closed = true` and `outcomePrices` exactly `["1","0"]` or `["0","1"]`), which gives `y ∈ {0, 1}`. Markets resolved fractionally (50/50 splits, disputed/voided) are **discarded** and counted in `wallet_scores.flags` — the no-skill null `y* ~ Bernoulli(p)` cannot produce fractional outcomes, so mixing them in would bias the test. Positions in markets that are still open (the wallet sold early) are excluded. Keep entry `avgPrice ∈ [0.03, 0.97]`, non-blocklisted markets. Stake `w = totalBought · avgPrice`, **winsorized** at the wallet's 95th percentile so one giant bet can't dominate.
-3. **Per (wallet, category)** and per (wallet, ALL): run `skill_mc_batch` (100k sims). Require `n_eff = (Σw)²/Σw² ≥ 20` to be testable.
+3. **Per (wallet, category)** and per (wallet, ALL): run `skill_mc_batch` in two passes — a 2,000-simulation *screen* for every test, then the full 100k simulations only for tests whose screened p-value is < 0.2 (a test that far from significance cannot pass BH at q = 0.10, so the precision would be wasted). Require `n_eff = (Σw)²/Σw² ≥ 20` to be testable.
 4. **Shrinkage**: estimate τ² by method of moments across testable wallets (`τ² = max(0, var(S) − mean(σ²))`), compute `post_edge`.
 5. **Certification**: BH at `q = 0.10` over all testable (wallet, category) tests jointly; certified ∧ `post_edge ≥ 0.03` ∧ no flags.
 6. **Limitation (documented, v1)**: positions exited before resolution are scored on outcome from the average entry price; early-exit skill is not credited separately.
@@ -245,7 +245,7 @@ A position event becomes a **signal** only if **all** pass (defaults in `config.
 - Cutoffs every 14 days over the available history (≥ 6 folds when data allows).
 - For each fold: score using positions resolved before T; collect certified wallets' BUY position events opened after T and resolved; apply gates G1–G5 and G7 historically (G6 approximated with a slippage model: `+max(0.01, 0.5·spread_estimate)`); record `y − follow_price − fee`.
 - Report per tier and baseline ("follow every ≥ $5k trade"): n, mean return per $, hit rate, t-stat, and a **calibration table** (predicted win prob = whale_price + post_edge, bucketed, vs realized frequency).
-- Written to `data/snapshot/validation.json`; shown verbatim on the dashboard, including a red `EDGE NOT CONFIRMED` banner if tier A mean return's t-stat < 2.
+- Written to `data/snapshot/validation.json`; shown verbatim on the dashboard. The verdict is computed over all signals (tiers A+B, since tier A alone is too sparse to test): `INSUFFICIENT DATA` if n < 30, `EDGE CONFIRMED` if the mean return's t-stat ≥ 2, otherwise a red `EDGE NOT CONFIRMED` banner. Per-tier rows are shown alongside. Caveat stated in the output: the wallet universe is seeded from the *current* leaderboard, which leaks some future information into selection.
 
 ### 4.8 Live station (`live.py`)
 
