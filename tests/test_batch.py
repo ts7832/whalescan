@@ -187,3 +187,18 @@ def test_cli_max_wallets_override(monkeypatch):
     monkeypatch.setattr(cli, "run_batch", fake)
     assert cli.main(["batch", "--max-wallets", "50", "--skip-validation"]) == 0
     assert seen["max"] == 50 and seen["kwargs"]["skip_validation"] is True
+
+
+def test_cli_quiets_per_request_http_logs(monkeypatch):
+    import logging
+
+    async def fake(cfg, **kwargs):
+        from whalescan.batch import BatchReport
+        return BatchReport()
+
+    monkeypatch.setattr(cli, "run_batch", fake)
+    logging.getLogger("httpx").setLevel(logging.NOTSET)
+    assert cli.main(["batch", "--skip-validation"]) == 0
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert cli.main(["-v", "batch", "--skip-validation"]) == 0
+    assert logging.getLogger("httpx").level == logging.DEBUG

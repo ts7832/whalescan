@@ -50,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
+    # httpx logs every request at INFO; a full batch makes tens of thousands of them.
+    logging.getLogger("httpx").setLevel(logging.DEBUG if args.verbose else logging.WARNING)
     cfg = load_config(args.config)
     if args.max_wallets:
         cfg = replace(cfg, universe=replace(cfg.universe, max_wallets=args.max_wallets))
