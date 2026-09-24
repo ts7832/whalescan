@@ -1,6 +1,8 @@
 import subprocess
 import sys
 
+from dataclasses import replace
+
 import pandas as pd
 import pytest
 
@@ -121,3 +123,32 @@ def test_lock_is_released_when_holder_is_sigkilled(tmp_path):
     assert lock_path.exists()
     with Store(tmp_path / "db.duckdb"):
         pass
+
+
+def test_closed_markets_without_clean_winner_are_refetched_for_a_while(tmp_path):
+    with Store(tmp_path / "db.duckdb") as s:
+        s.upsert_positions([position(cid="0xclean"), position(asset="a2", cid="0xpending"),
+                            position(asset="a3", cid="0xancient")])
+        now = 1_790_000_000
+        s.upsert_markets([market("0xclean"),
+                          replace(market("0xpending", prices=(0.9995, 0.0005)), closed_ts=now - 3600),
+                          replace(market("0xancient", prices=(0.5, 0.5)), closed_ts=now - 30 * 86400)],
+                         now=now - 7 * 3600)
+        # pending resolution, closed recently -> re-check; clean winner or long-settled split -> leave alone
+        assert s.condition_ids_needing_refresh(now=now, open_max_age_s=3600) == {"0xpending"}
+
+
+def test_markets_gamma_never_returns_are_not_requeried_every_run(tmp_path):
+    with Store(tmp_path / "db.duckdb") as s:
+        s.upsert_positions([position(cid="0xghost")])
+        assert s.condition_ids_needing_refresh(now=10, open_max_age_s=3600) == {"0xghost"}
+        s.mark_missing_markets({"0xghost"}, now=10)
+        assert s.condition_ids_needing_refresh(now=20, open_max_age_s=3600) == set()
+        assert s.condition_ids_needing_refresh(now=10 + 25 * 3600, open_max_age_s=3600) == {"0xghost"}
+
+
+def test_positions_frame_carries_fetch_time(tmp_path):
+    with Store(tmp_path / "db.duckdb") as s:
+        s.upsert_positions([position()])
+        s.record_wallet_fetch("0xw", fetched_at=77, complete=True, source="x")
+        assert s.positions_frame()["fetched_at"].tolist() == [77]

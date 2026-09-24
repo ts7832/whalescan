@@ -24,6 +24,7 @@ leaderboard_orders = ["PNL", "VOL"]
 leaderboard_pages = 10
 large_trade_min_usdc = 5000
 large_trade_lookback_days = 30
+max_wallet_age_days = 14
 
 [scoring]
 n_sims = 100000

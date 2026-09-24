@@ -69,6 +69,25 @@ async def _guarded(coro: Any, what: str) -> Any:
         return None
 
 
+async def _run_all(coros: Any) -> None:
+    """Run coroutines concurrently; the first failure cancels the rest and is re-raised as itself
+    (not wrapped in an ExceptionGroup), so BlockedError still reaches the CLI's exit-code-3 path."""
+    try:
+        async with asyncio.TaskGroup() as tg:
+            for c in coros:
+                tg.create_task(c)
+    except ExceptionGroup as eg:
+        raise eg.exceptions[0] from None
+
+
+def drop_stale_wallets(frame: pd.DataFrame, *, now: int, max_age_days: float) -> pd.DataFrame:
+    """Wallets not refreshed recently (e.g. dropped from the universe) are not scored from old data."""
+    if frame.empty:
+        return frame
+    fetched = pd.to_numeric(frame["fetched_at"], errors="coerce").fillna(0)
+    return frame[fetched >= now - max_age_days * 86400]
+
+
 async def discover_universe(apis: Apis, store: Store, cfg: Config, now: int) -> dict[str, str]:
     u = cfg.universe
     sources: dict[str, str] = {}
@@ -121,7 +140,7 @@ async def refresh_positions(apis: Apis, store: Store, wallets: Mapping[str, str]
         if done % step == 0 or done == len(wallets):
             log.info("positions: %d/%d wallets", done, len(wallets))
 
-    await asyncio.gather(*(one(w, s) for w, s in wallets.items()))
+    await _run_all(one(w, s) for w, s in wallets.items())
     return failures
 
 
@@ -129,7 +148,9 @@ async def refresh_markets(apis: Apis, store: Store, now: int) -> None:
     ids = store.condition_ids_needing_refresh(now, MARKET_MAX_AGE_S)
     if ids:
         log.info("fetching metadata for %d markets", len(ids))
-        store.upsert_markets((await apis.gamma.markets(ids)).values(), now)
+        found = await apis.gamma.markets(ids)
+        store.upsert_markets(found.values(), now)
+        store.mark_missing_markets(ids - found.keys(), now)
 
 
 async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFrame, blocklist: Blocklist,
@@ -145,7 +166,7 @@ async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFr
         if page is not None:
             store.upsert_trades(page.trades)
 
-    await asyncio.gather(*(wallet_trades(w) for w in sorted(book.certified_wallets())))
+    await _run_all(wallet_trades(w) for w in sorted(book.certified_wallets()))
     page = await _guarded(apis.data.trades(min_usdc=g.min_usdc, since_ts=since), "large trades")
     if page is not None:
         store.upsert_trades(page.trades)
@@ -190,7 +211,7 @@ async def maybe_validate(apis: Apis, store: Store, cfg: Config, eligible: pd.Dat
         if page is not None:
             store.upsert_trades(page.trades)
 
-    await asyncio.gather(*(history(w) for w in wallets))
+    await _run_all(history(w) for w in wallets)
     await refresh_markets(apis, store, now)
     trades = trades_from_frame(store.trades_frame(wallets=wallets))
     markets = store.markets_by_id({t.condition_id for t in trades})
@@ -249,7 +270,8 @@ async def run_batch(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             failures = await refresh_positions(apis, store, wallets, cfg.http.concurrency, now)
             await refresh_markets(apis, store, now)
 
-            frame = store.positions_frame()
+            frame = drop_stale_wallets(store.positions_frame(), now=now,
+                                       max_age_days=cfg.universe.max_wallet_age_days)
             complete = frame[frame["complete"].astype(bool)]
             report.wallets_complete = int(complete["wallet"].nunique())
             eligible = prepare_positions(frame, cfg.scoring, cfg.categories, blocklist)
@@ -280,7 +302,8 @@ async def run_batch(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             out = cfg.path(cfg.paths.snapshot_dir)
             write_json_atomic(out / "signals.json", signals)
             write_json_atomic(out / "contacts.json", contacts)
-            write_json_atomic(out / "whales.json", whales_json(scores, eligible, names))
+            write_json_atomic(out / "whales.json", whales_json(scores, eligible, names,
+                                                               min_n_eff=cfg.scoring.min_n_eff))
             if validation is not None:
                 write_json_atomic(out / "validation.json", validation)
             write_json_atomic(out / "meta.json", _meta_json(cfg, report, now, store.get_meta("validation_at")))

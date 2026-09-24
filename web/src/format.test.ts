@@ -38,3 +38,20 @@ describe('format', () => {
     expect(signalsEmptyMessage(meta(1))).toBe('NO SIGNALS · 1 CERTIFIED WHALE UNDER WATCH');
   });
 });
+
+
+import { fmtDate, isSnapshotStale } from './format';
+
+describe('dates and staleness', () => {
+  it('never renders a missing date as 1970', () => {
+    expect(fmtDate(null)).toBe('—');
+    expect(fmtDate(0)).toBe('—');
+    expect(fmtDate(86400)).toBe('1970-01-02');
+  });
+
+  it('flags a snapshot older than 8 hours as stale', () => {
+    const m = meta(1);
+    expect(isSnapshotStale({ ...m, generated_at: 0 }, 8 * 3600)).toBe(false);
+    expect(isSnapshotStale({ ...m, generated_at: 0 }, 8 * 3600 + 1)).toBe(true);
+  });
+});

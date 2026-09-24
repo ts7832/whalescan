@@ -99,6 +99,7 @@ b { font-weight: 600; }
 .kv dt { color: var(--dim); font-size: 10px; letter-spacing: 0.08em; }
 .kv dd { margin: 0; grid-row: 2; }
 .stale { color: var(--amber); font-size: 10px; letter-spacing: 0.08em; }
+.signal-list.is-stale { opacity: 0.45; filter: grayscale(1); margin-top: 8px; }
 
 table { width: 100%; border-collapse: collapse; }
 th {

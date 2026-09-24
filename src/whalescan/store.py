@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS wallet_scores (
   p_value DOUBLE, bh_pass BOOLEAN, certified BOOLEAN, flags VARCHAR, median_stake DOUBLE, as_of BIGINT,
   PRIMARY KEY (wallet, category));
 CREATE TABLE IF NOT EXISTS meta (key VARCHAR PRIMARY KEY, value VARCHAR);
+CREATE TABLE IF NOT EXISTS missing_markets (condition_id VARCHAR PRIMARY KEY, fetched_at BIGINT);
 """
 
 TRADE_COLS = [f.name for f in fields(Trade)]
@@ -181,13 +182,27 @@ class Store:
                LEFT JOIN (SELECT wallet, max(ts) AS max_ts FROM positions GROUP BY wallet) p USING (wallet)""").fetchall()
         return {w: WalletState(int(f or 0), bool(c), _opt_int(m), n or "") for w, f, c, m, n in rows}
 
-    def condition_ids_needing_refresh(self, now: int, open_max_age_s: int) -> set[str]:
+    def condition_ids_needing_refresh(self, now: int, open_max_age_s: int, *, missing_retry_s: int = 86400,
+                                      settle_window_s: int = 14 * 86400) -> set[str]:
+        """Markets to (re)fetch: unknown ones (unless Gamma recently didn't have them), stale open ones, and
+        recently closed ones whose outcome prices are not final yet (UMA resolution lags market close)."""
         rows = self.con.execute(
             """WITH ids AS (SELECT condition_id FROM positions UNION SELECT condition_id FROM trades)
-               SELECT ids.condition_id FROM ids LEFT JOIN markets m USING (condition_id)
-               WHERE m.condition_id IS NULL OR (NOT m.closed AND m.fetched_at < ?)""",
-            [now - open_max_age_s]).fetchall()
+               SELECT ids.condition_id FROM ids
+               LEFT JOIN markets m USING (condition_id)
+               LEFT JOIN missing_markets x USING (condition_id)
+               WHERE (m.condition_id IS NULL AND (x.fetched_at IS NULL OR x.fetched_at < ?))
+                  OR (NOT m.closed AND m.fetched_at < ?)
+                  OR (m.closed AND m.fetched_at < ?
+                      AND COALESCE(m.closed_ts, m.fetched_at) >= ?
+                      AND len(list_filter(m.outcome_prices, p -> p > 0 AND p < 1)) > 0)""",
+            [now - missing_retry_s, now - open_max_age_s, now - open_max_age_s, now - settle_window_s]).fetchall()
         return {r[0] for r in rows}
+
+    def mark_missing_markets(self, ids: Iterable[str], now: int) -> None:
+        rows = [(i, now) for i in ids]
+        if rows:
+            self.con.executemany("INSERT OR REPLACE INTO missing_markets VALUES (?, ?)", rows)
 
     def positions_frame(self) -> pd.DataFrame:
         df = self.con.execute(
@@ -195,7 +210,7 @@ class Store:
                       p.outcome_index, p.title, p.ts, p.event_slug, m.slug AS market_slug,
                       m.event_slug AS market_event_slug, COALESCE(m.closed, FALSE) AS closed, m.closed_ts,
                       m.volume, m.tags, m.outcome_prices, COALESCE(w.complete, FALSE) AS complete,
-                      w.history_start_ts
+                      w.history_start_ts, w.fetched_at
                FROM positions p
                LEFT JOIN markets m USING (condition_id)
                LEFT JOIN wallets w USING (wallet)""").df()

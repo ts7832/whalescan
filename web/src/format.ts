@@ -27,7 +27,11 @@ export function fmtAge(seconds: number): string {
 
 export const fmtUtc = (ts: number): string => `${new Date(ts * 1000).toISOString().slice(11, 16)}Z`;
 
-export const fmtDate = (ts: number): string => new Date(ts * 1000).toISOString().slice(0, 10);
+export const fmtDate = (ts: number | null | undefined): string =>
+  ts ? new Date(ts * 1000).toISOString().slice(0, 10) : '—';
+
+/** A snapshot is stale when the 6-hourly job has missed at least one run. */
+export const isSnapshotStale = (meta: Meta, now: number, maxAgeH = 8): boolean => now - meta.generated_at > maxAgeH * 3600;
 
 export const shortWallet = (w: string): string => `${w.slice(0, 6)}…${w.slice(-4)}`;
 

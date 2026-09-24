@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { fmtAge, fmtCents, fmtPrice, fmtUsd, signalsEmptyMessage } from '../format';
+import { fmtAge, fmtCents, fmtPrice, fmtUsd, isSnapshotStale, signalsEmptyMessage } from '../format';
 import type { Meta, Signal } from '../types';
 import { Panel } from './Panel';
 
@@ -23,10 +23,13 @@ export function SignalsPanel({ signals, selectedId, onSelect, meta, now, categor
   );
   return (
     <Panel code="01" title="SIGNALS" className="area-signals" right={filter}>
+      {isSnapshotStale(meta, now) && signals.length > 0 && (
+        <div className="stale" role="alert">SNAPSHOT {fmtAge(now - meta.generated_at)} OLD — SIGNALS MAY BE OUTDATED</div>
+      )}
       {signals.length === 0 ? (
         <p className="empty">{signalsEmptyMessage(meta)}</p>
       ) : (
-        <ul className="signal-list">
+        <ul className={`signal-list ${isSnapshotStale(meta, now) ? 'is-stale' : ''}`}>
           {signals.map((s) => (
             <li key={s.id}>
               <SignalCard s={s} selected={s.id === selectedId} onSelect={() => onSelect(s.id)} now={now} />

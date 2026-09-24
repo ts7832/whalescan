@@ -130,3 +130,18 @@ async def test_each_host_gets_its_own_rate_limit():
     await c.get_json("https://slow.test/x")       # default bucket, burst 1: first call free
     await c.get_json("https://slow.test/x")       # second call waits 1 s at 1/s
     assert sleeps == [pytest.approx(1.0)]
+
+
+async def test_cloudflare_challenge_on_503_is_a_block_but_plain_503_is_retried():
+    challenge = client(lambda r: httpx.Response(503, text="<html>", headers={"cf-mitigated": "challenge",
+                                                                              "content-type": "text/html"}))
+    with pytest.raises(BlockedError):
+        await challenge.get_json("https://x.test/")
+    calls = {"n": 0}
+
+    def flaky(request):
+        calls["n"] += 1
+        return httpx.Response(503, text="<html>busy</html>", headers={"content-type": "text/html"}) \
+            if calls["n"] == 1 else httpx.Response(200, json=1)
+
+    assert await client(flaky).get_json("https://x.test/") == 1

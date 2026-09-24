@@ -52,8 +52,11 @@ class TokenBucket:
 
 
 def _is_block(r: httpx.Response) -> bool:
-    ctype = r.headers.get("content-type", "")
-    return r.status_code == 403 and "application/json" not in ctype
+    """Bot protection, not throttling: a Cloudflare challenge (any status) or a non-JSON 403.
+    A plain 503/429 HTML error page is an outage or rate limit and is retried."""
+    if r.headers.get("cf-mitigated", "").lower() == "challenge":
+        return True
+    return r.status_code == 403 and "application/json" not in r.headers.get("content-type", "")
 
 
 def _retry_after(r: httpx.Response) -> float | None:

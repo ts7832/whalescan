@@ -89,13 +89,14 @@ def evaluation_json(e: Evaluation, market: Market | None, names: Mapping[str, st
 
 
 def whales_json(scores: pd.DataFrame, eligible: pd.DataFrame, names: Mapping[str, str], *, recent_n: int = 12,
-                watchlist_n: int = 25) -> list[dict[str, Any]]:
+                watchlist_n: int = 25, min_n_eff: float = 0.0) -> list[dict[str, Any]]:
     """Certified wallets plus a watchlist of the most significant uncertified, unflagged wallets."""
     if scores.empty:
         return []
     overall = scores[scores["category"] == "ALL"].set_index("wallet")
     certified = set(scores.loc[scores["certified"].astype(bool), "wallet"])
-    watch = [w for w in overall[overall["flags"] == ""].sort_values("p_value").index if w not in certified]
+    candidates = overall[(overall["flags"] == "") & (overall["n_eff"] >= min_n_eff)]
+    watch = [w for w in candidates.sort_values("p_value").index if w not in certified]
     out = []
     for wallet in sorted(certified) + watch[:watchlist_n]:
         cats = scores[scores["wallet"] == wallet].sort_values("p_value")

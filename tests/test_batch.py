@@ -266,3 +266,43 @@ async def test_guarded_swallows_parse_errors_but_not_blocks():
     assert await _guarded(bad_payload(), "history") is None
     with pytest.raises(BlockedError):
         await _guarded(blocked(), "x")
+
+
+def test_stale_wallets_are_not_scored():
+    import pandas as pd
+
+    from whalescan.batch import drop_stale_wallets
+    frame = pd.DataFrame({"wallet": ["0xfresh", "0xstale", "0xnever"], "fetched_at": [NOW - DAY, NOW - 30 * DAY, None]})
+    assert drop_stale_wallets(frame, now=NOW, max_age_days=14)["wallet"].tolist() == ["0xfresh"]
+
+
+async def test_block_in_one_task_cancels_the_rest():
+    import asyncio
+
+    from whalescan.batch import _run_all
+    finished = []
+
+    async def slow(i):
+        await asyncio.sleep(0.2)
+        finished.append(i)
+
+    async def blocked():
+        raise BlockedError("BLOCKED")
+
+    with pytest.raises(BlockedError):
+        await _run_all([slow(1), blocked(), slow(2)])
+    await asyncio.sleep(0.3)
+    assert finished == []
+
+
+def test_watchlist_requires_enough_evidence():
+    import pandas as pd
+
+    from whalescan.snapshot import whales_json
+    from whalescan.scoring import ELIGIBLE_COLUMNS, SCORE_COLUMNS
+    row = dict(category="ALL", n=5, edge=0.3, sigma=0.1, post_edge=0.0, bh_pass=False, certified=False, flags="",
+               median_stake=10.0, as_of=0)
+    scores = pd.DataFrame([dict(row, wallet="0xthin", n_eff=5.0, p_value=0.001),
+                           dict(row, wallet="0xsolid", n_eff=60.0, p_value=0.2)], columns=SCORE_COLUMNS)
+    out = whales_json(scores, pd.DataFrame(columns=ELIGIBLE_COLUMNS), {}, min_n_eff=20)
+    assert [w["wallet"] for w in out] == ["0xsolid"]
