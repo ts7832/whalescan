@@ -38,6 +38,9 @@ class FakeGamma:
         self.asked.append(set(ids))
         return {"0xc": MARKET} if "0xc" in ids else {}
 
+    async def created_ts(self, wallet):
+        return NOW - 86400 if wallet.startswith("0xfresh") else NOW - 400 * 86400
+
 
 class FakeClob:
     skipped = 0
@@ -206,6 +209,9 @@ class FakeData:
     def __init__(self):
         self.calls = []
 
+    async def markets_traded(self, wallet):
+        return 1
+
     async def trades(self, *, user=None, min_usdc=None, since_ts=None):
         from whalescan.api.data_api import TradePage
         from whalescan.models import Trade
@@ -224,3 +230,16 @@ async def test_warm_up_replays_recent_trades_from_rest_and_disk(tmp_path):
     assert len(s.state.events) == 1                      # the same fill from both sources counts once
     assert s.watch == ["yes"] and s.clob_socket.sent[-1]["operation"] == "subscribe"
     s.close()
+
+
+async def test_station_fetches_profiles_for_fresh_big_news_bets(tmp_path):
+    s, gamma, clob = station(tmp_path)
+    s.data = FakeData()
+    got = []
+    s.hub.subscribe_callback(got.append)
+    await s.handle_rtds(rtds_frame(wallet="0xFRESH9", usdc=30_000.0, tx="0xf"))
+    await s.tick()      # market + profile fetched, book subscribed
+    await s.handle_clob(json.dumps({"event_type": "book", "asset_id": "yes", "timestamp": str(NOW * 1000),
+                                    "bids": [{"price": "0.39", "size": "5000"}], "asks": [{"price": "0.41", "size": "100000"}]}))
+    assert ("signal", "INSIDER") in [(m["type"], m["data"].get("status")) for m in got]
+    assert s.meta()["counts"]["insiders"] == 1

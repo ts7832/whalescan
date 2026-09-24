@@ -25,6 +25,7 @@ from whalescan.api.clob import ClobApi
 from whalescan.api.data_api import DataApi
 from whalescan.api.gamma import GammaApi
 from whalescan.api.http import ApiError, BlockedError, HttpClient
+from whalescan.api.profiles import fetch_profile
 from whalescan.config import ROOT, Config
 from whalescan.live_state import LiveState
 from whalescan.models import BookSnapshot, Trade
@@ -170,6 +171,7 @@ class Station:
         self.feed_latency_ms: int | None = None
         self._pending: list[Trade] = []
         self._market_asked: dict[str, float] = {}
+        self._profile_asked: dict[str, float] = {}
         self._stopping = False
 
     # ------------------------------------------------------------------ inputs
@@ -260,6 +262,20 @@ class Station:
             if found:
                 self._emit(self.state.set_markets(found, now))
 
+        wanted_profiles = {w for w in self.state.missing_profiles()
+                           if now - self._profile_asked.get(w, -1e18) >= MARKET_RETRY_S}
+        if wanted_profiles:
+            self._profile_asked.update(dict.fromkeys(wanted_profiles, now))
+            sem = asyncio.Semaphore(self.cfg.http.concurrency)
+
+            async def one(w: str) -> Any:
+                async with sem:
+                    return await self._guard(fetch_profile(self.gamma, self.data, w, now=now), f"profile {w}")
+
+            got = [p for p in await asyncio.gather(*(one(w) for w in sorted(wanted_profiles))) if p is not None]
+            if got:
+                self._emit(self.state.set_profiles({p.wallet: p for p in got}, now))
+
         watch = self.state.watch_set(now)
         added = [a for a in watch if a not in self.watch]
         removed = sorted(set(self.watch) - set(watch))
@@ -307,6 +323,7 @@ class Station:
             "version": __version__,
             "mode": "LIVE",
             "counts": {**base.get("counts", {}), "signals": len(st["signals"]), "contacts": len(st["contacts"]),
+                       "insiders": self.state.insider_count(),
                        "certified_wallets": len(self.state.scores.certified_wallets())},
             "params": base.get("params", {"bh_q": self.cfg.scoring.bh_q, "min_usdc": self.cfg.gate.min_usdc,
                                           "conviction_k": self.cfg.gate.conviction_k,

@@ -18,11 +18,13 @@ import pandas as pd
 from whalescan.classify import Blocklist, category_for_tags
 from whalescan.config import Config
 from whalescan.gate import Evaluation, GateContext, PositionEvent, ScoreBook, _merge, evaluate
-from whalescan.models import Market, Trade
+from whalescan.insider import account_age_days, evaluate_insider, is_insider_candidate
+from whalescan.models import Market, Trade, WalletProfile
 from whalescan.snapshot import evaluation_json
 from whalescan.stream.books import LiveBooks
 
 Message = dict[str, Any]
+OPEN = ("SIGNAL", "INSIDER")  # statuses shown on the signal board
 
 
 class LiveState:
@@ -45,6 +47,7 @@ class LiveState:
         self._book_sig: dict[str, tuple[Any, ...] | None] = {}
         self.signals: dict[str, Message] = {}
         self.contacts: dict[str, Message] = {}
+        self.profiles: dict[str, WalletProfile] = {}
 
     # ---------------------------------------------------------------- inputs
 
@@ -84,6 +87,10 @@ class LiveState:
         self.markets.update(markets)
         return self._reevaluate(self._ids(i for c in markets for i in self._by_cid.get(c, ())), now)
 
+    def set_profiles(self, profiles: Mapping[str, WalletProfile], now: int) -> list[Message]:
+        self.profiles.update(profiles)
+        return self._reevaluate([e for e in self.events.values() if e.wallet in profiles], now)
+
     def set_scores(self, scores: pd.DataFrame, now: int) -> list[Message]:
         self._set_scores(scores)
         return self._reevaluate(list(self.events.values()), now)
@@ -122,9 +129,14 @@ class LiveState:
             return max((self.events[i].last_ts for i in self._by_asset.get(asset, ())), default=0)
 
         signal_assets = sorted({self.events[i].asset for i in self.signals if i in self.events}, key=lambda a: -latest(a))
+        def fresh_or_unknown(e: PositionEvent) -> bool:
+            age = account_age_days(e, self.profiles.get(e.wallet))
+            return e.wallet not in self.profiles or (age is not None and age <= self.cfg.insider.max_age_days)
+
         recent = sorted((e for e in self.events.values()
                          if e.side == "BUY" and e.last_ts >= horizon and not self._closed(e)
-                         and self.scores.certified(e.wallet, self._category(e))),
+                         and (self.scores.certified(e.wallet, self._category(e))
+                              or (self._insider_candidate(e) and fresh_or_unknown(e)))),
                         key=lambda e: -e.last_ts)
         out: list[str] = []
         for asset in signal_assets + [e.asset for e in recent]:
@@ -132,15 +144,27 @@ class LiveState:
                 out.append(asset)
         return out[:self.max_watch]
 
+    def insider_count(self) -> int:
+        return sum(1 for s in self.signals.values() if s.get("kind") == "INSIDER")
+
     def signal_assets(self) -> set[str]:
         return {self.events[i].asset for i in self.signals if i in self.events}
+
+    def _insider_candidate(self, ev: PositionEvent) -> bool:
+        return (ev.wallet not in self._certified
+                and is_insider_candidate(ev, self._category(ev), self.cfg.insider) and not self._closed(ev))
+
+    def missing_profiles(self) -> set[str]:
+        """Wallets whose account age decides whether a big bet is an insider alert."""
+        return {e.wallet for e in self.events.values() if self._insider_candidate(e)} - self.profiles.keys()
 
     def missing_markets(self) -> set[str]:
         return {e.condition_id for e in self.events.values()} - self.markets.keys()
 
     def state(self) -> dict[str, list[Message]]:
         contacts = sorted(self.contacts.values(), key=lambda c: -c["last_ts"])[:self.g.max_contacts]
-        signals = sorted(self.signals.values(), key=lambda s: (s["tier"] or "Z", -(s["net_edge"] or 0.0)))
+        signals = sorted(self.signals.values(), key=lambda s: (s.get("kind") != "INSIDER", s["tier"] or "Z",
+                                                               -(s["net_edge"] or 0.0), -s["usdc"]))
         return {"signals": signals, "contacts": contacts}
 
     # ---------------------------------------------------------------- internals
@@ -164,7 +188,13 @@ class LiveState:
         # G7 and consensus only ever look at the same market, so the market's own events suffice.
         ctx = GateContext(cfg=self.g, categories=self.cfg.categories, blocklist=self.blocklist, scores=self.scores,
                           markets=self.markets, events=self._ids(self._by_cid[ev.condition_id]), now=now)
-        return evaluate(ev, ctx, self.books.quote(ev.asset, self.g.follow_size_usdc))
+        quote = self.books.quote(ev.asset, self.g.follow_size_usdc)
+        e = evaluate(ev, ctx, quote)
+        if e.status != "SIGNAL" and self._insider_candidate(ev) and ev.wallet in self.profiles:
+            # Not a proven sniper, but maybe an insider: judge it by the account instead of its track record.
+            return evaluate_insider(ev, self.profiles[ev.wallet], self.markets.get(ev.condition_id), e.category,
+                                    self.cfg.insider, self.blocklist, quote, now)
+        return e
 
     def _reevaluate(self, events: list[PositionEvent], now: int) -> list[Message]:
         msgs: list[Message] = []
@@ -172,15 +202,15 @@ class LiveState:
             e = self._evaluate(ev, now)
             data = dict(evaluation_json(e, self.markets.get(ev.condition_id), self.names, None), book="OK")
             is_open = ev.id in self.signals
-            if e.status == "SIGNAL":
+            if e.status in OPEN:
                 kind = "signal_update" if is_open else "signal"
                 self.signals[ev.id] = data
                 self.contacts.pop(ev.id, None)
             elif is_open:
                 kind = "signal_update"
                 failed = e.failed()
-                only_g6 = e.status == "REJECTED" and len(failed) == 1 and failed[0].code == "G6"
-                if only_g6 and failed[0].detail.startswith("FOLLOW"):
+                only_g6 = e.status == "REJECTED" and len(failed) == 1 and failed[0].code in ("G6", "I6")
+                if only_g6 and failed[0].detail.startswith(("FOLLOW", "PRICE MOVED")):
                     data = dict(data, status="STALE")  # still valid, but no longer worth the entry price
                     self.signals[ev.id] = data
                 elif only_g6:

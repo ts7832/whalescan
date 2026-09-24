@@ -199,3 +199,40 @@ def test_fills_sharing_a_transaction_at_different_prices_all_count():
     s.on_trade(trade(tx="0xsweep", usdc=3_000.0, price=0.40), NOW)
     msgs = s.on_trade(trade(tx="0xsweep", usdc=3_000.0, price=0.41), NOW)
     assert msgs and msgs[0]["data"]["usdc"] == pytest.approx(6_000.0) and msgs[0]["data"]["n_fills"] == 2
+
+
+# ---------------------------------------------------------------- insider detector (primary signal)
+
+def fresh(wallet="0xfresh", age_days=1.0, markets=2):
+    from whalescan.models import WalletProfile
+    return WalletProfile(wallet, int(NOW - 3600 - age_days * 86400), markets, NOW)
+
+
+def test_fresh_wallet_needs_a_profile_then_becomes_an_insider_alert():
+    s = state()
+    seed_book(s)
+    msgs = s.on_trade(trade(wallet="0xfresh", usdc=30_000.0), NOW)
+    assert [m["data"]["status"] for m in msgs] == ["REJECTED"]
+    assert s.missing_profiles() == {"0xfresh"} and "yes" in s.watch_set(NOW)
+    msgs = s.set_profiles({"0xfresh": fresh()}, NOW)
+    assert [(m["type"], m["data"]["status"], m["data"]["kind"], m["data"]["tier"]) for m in msgs] == \
+        [("signal", "INSIDER", "INSIDER", "A")]
+    assert s.missing_profiles() == set()
+
+
+def test_old_account_stays_a_contact_with_the_reason():
+    s = state()
+    seed_book(s)
+    s.on_trade(trade(wallet="0xveteran", usdc=30_000.0), NOW)
+    msgs = s.set_profiles({"0xveteran": fresh("0xveteran", age_days=400)}, NOW)
+    assert msgs[0]["type"] == "contact" and msgs[0]["data"]["checks"][1]["detail"] == "400.0D OLD"
+
+
+def test_insider_goes_stale_when_the_price_runs_away():
+    s = state()
+    seed_book(s)
+    s.on_trade(trade(wallet="0xfresh", usdc=30_000.0), NOW)
+    s.set_profiles({"0xfresh": fresh()}, NOW)
+    s.books.on_changes(PriceChanges(NOW * 1000 + 1, ("yes", "yes"), (1, 1), (0.41, 0.50), (0.0, 100_000.0),
+                                    (0.39, 0.39), (None, 0.50)))
+    assert [(m["type"], m["data"]["status"]) for m in s.on_book("yes", NOW)] == [("signal_update", "STALE")]
