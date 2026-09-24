@@ -6,6 +6,8 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <utility>
+#include <vector>
 
 namespace whalecore {
 
@@ -47,6 +49,8 @@ public:
     // (bid size - ask size) / total over the top `levels` levels; 0 when empty.
     double imbalance(int levels) const;
     bool crossed() const;
+    // Best `n` (price, size) levels of one side, best first.
+    std::vector<std::pair<double, double>> levels(Side side, std::size_t n) const;
     std::size_t level_count(Side side) const;
 
     static std::int32_t to_ticks(double price);

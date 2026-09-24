@@ -157,6 +157,16 @@ double OrderBook::imbalance(int levels) const {
     return (a + b) > 0.0 ? (b - a) / (b + a) : 0.0;
 }
 
+std::vector<std::pair<double, double>> OrderBook::levels(Side side, std::size_t n) const {
+    std::vector<std::pair<double, double>> out;
+    auto take = [&](const auto& book) {
+        for (auto it = book.begin(); it != book.end() && out.size() < n; ++it)
+            out.emplace_back(to_price(it->first), it->second);
+    };
+    if (side == Side::Bid) take(bids_); else take(asks_);
+    return out;
+}
+
 bool OrderBook::crossed() const {
     return !bids_.empty() && !asks_.empty() && bids_.begin()->first >= asks_.begin()->first;
 }

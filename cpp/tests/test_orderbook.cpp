@@ -153,3 +153,15 @@ TEST_CASE("prices off the 0.0001 grid are rejected, grid prices are exact") {
     REQUIRE_THAT(*b.best_bid(), WithinAbs(0.0001, 1e-15));
     REQUIRE_THAT(*b.best_ask(), WithinAbs(0.9999, 1e-15));
 }
+
+TEST_CASE("levels lists the best n levels from the top of each side") {
+    const auto b = make_book();
+    const auto asks = b.levels(Side::Ask, 2);
+    REQUIRE(asks.size() == 2);
+    REQUIRE_THAT(asks[0].first, WithinAbs(0.50, 1e-12));
+    REQUIRE_THAT(asks[1].first, WithinAbs(0.52, 1e-12));
+    REQUIRE(asks[1].second == 200.0);
+    const auto bids = b.levels(Side::Bid, 10);
+    REQUIRE(bids.size() == 3);
+    REQUIRE_THAT(bids[0].first, WithinAbs(0.40, 1e-12));
+}

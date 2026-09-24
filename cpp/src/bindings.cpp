@@ -1,6 +1,7 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -104,5 +105,6 @@ NB_MODULE(whalecore, m) {
         .def("walk", &OrderBook::walk, "side"_a, "notional_usdc"_a)
         .def("imbalance", &OrderBook::imbalance, "levels"_a = 5)
         .def("crossed", &OrderBook::crossed)
+        .def("levels", &OrderBook::levels, "side"_a, "n"_a = 10)
         .def("level_count", &OrderBook::level_count, "side"_a);
 }
