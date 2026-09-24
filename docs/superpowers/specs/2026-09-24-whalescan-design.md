@@ -1,7 +1,7 @@
 # WHALESCAN — Design Spec
 
 **Date:** 2026-09-24 · **Status:** Approved design, pending spec review
-**One line:** A zero-cost Polymarket intelligence station that finds wallets with *statistically proven* forecasting skill, watches them live, and surfaces only the few trades worth a human's attention.
+**One line:** A zero-cost Polymarket **insider & whale scanner**: its primary signal is fresh accounts placing big bets on news markets (the insider pattern); its secondary signal is rare, huge-winning, big-bet "sniper" wallets proven against luck. *(Revised 2026-09-24 at the user's direction: generic high-frequency skill no longer produces signals; see the Plan 2 addendum for the evidence.)*
 
 ---
 

@@ -1,13 +1,25 @@
 # WHALESCAN
 
-**A statistically certified Polymarket whale scanner.** It finds wallets whose forecasting skill survives a
-Monte Carlo significance test *and* a false-discovery-rate correction, watches their trades in real time, and
-surfaces only the few that are still worth following after the real cost of entry. It then checks, out of
-sample, whether following them would actually have made money. Humans decide; the tool never trades.
+**A Polymarket insider & whale scanner.** Its main job is catching **fresh-account whales**: wallets only hours or
+days old that put tens of thousands of dollars on a single news-driven market. That's the classic insider
+pattern. As a secondary signal it flags **snipers**: old accounts that trade rarely, bet big, and win at an
+extreme, statistically verified rate. Everything is tracked live, every rule is backtested, and humans decide.
+The tool never trades.
 
 **Live dashboard:** https://ts7832.github.io/whalescan/ (rebuilt every 6 hours by GitHub Actions; €0 infrastructure)
 
 ![WHALESCAN dashboard](docs/img/dashboard-snapshot.png)
+
+## What it looks for
+
+| Alert | Rule (all thresholds in `config.toml`) |
+|---|---|
+| **INSIDER** (primary) | a buy of ≥ $10k by an account **≤ 7 days old** (tier A: ≤ 2 days and ≥ $25k) that has traded **≤ 10 markets ever**, in a **news-type market** (politics, geopolitics, economy, tech, culture…), with the price not yet run away (following costs ≤ 5¢ more) |
+| **SNIPER** (secondary) | a wallet with **8–50** resolved bets, a **≥ 80% win rate**, a **median bet ≥ $5k**, and a Monte Carlo p-value ≤ 1% against pure luck (so buying 95¢ favourites can't fake it) |
+
+Why news markets only: in the data, fresh wallets betting big on **political markets won 90% of the time
+(+25¢ per share)**, while fresh wallets on **sports were noise (+3¢)**. Private information exists for news,
+not for most games.
 
 ## What it found
 
