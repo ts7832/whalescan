@@ -13,6 +13,7 @@ find_package(Threads REQUIRED)
 add_library(whalecore_lib STATIC
   cpp/src/version.cpp
   cpp/src/montecarlo.cpp
+  cpp/src/orderbook.cpp
 )
 target_include_directories(whalecore_lib PUBLIC cpp/include)
 target_link_libraries(whalecore_lib PUBLIC Threads::Threads)
@@ -36,6 +37,7 @@ if(WHALECORE_BUILD_TESTS)
   add_executable(whalecore_tests
     cpp/tests/test_version.cpp
     cpp/tests/test_montecarlo.cpp
+    cpp/tests/test_orderbook.cpp
   )
   target_link_libraries(whalecore_tests PRIVATE whalecore_lib Catch2::Catch2WithMain)
   include(CTest)

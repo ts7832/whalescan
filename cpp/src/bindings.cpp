@@ -1,5 +1,6 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -8,6 +9,7 @@
 #include <string>
 
 #include "whalecore/montecarlo.hpp"
+#include "whalecore/orderbook.hpp"
 #include "whalecore/version.hpp"
 
 namespace nb = nanobind;
@@ -15,6 +17,10 @@ using namespace nb::literals;
 
 template <class T>
 using Vec = nb::ndarray<const T, nb::ndim<1>, nb::c_contig, nb::device::cpu>;
+
+using Levels = nb::ndarray<const double, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>;
+
+static std::span<const double> flat(const Levels& a) { return {a.data(), a.shape(0) * 2}; }
 
 template <class T>
 std::span<const T> as_span(const Vec<T>& a) {
@@ -62,4 +68,36 @@ NB_MODULE(whalecore, m) {
         },
         "prices"_a, "outcomes"_a, "weights"_a, "offsets"_a, "n_sims"_a = 100000, "seed"_a = 42,
         "n_threads"_a = 0, "Multithreaded skill_mc over CSR-packed records.");
+
+    using whalecore::OrderBook;
+    using whalecore::Side;
+    using whalecore::WalkResult;
+
+    nb::enum_<Side>(m, "Side").value("BID", Side::Bid).value("ASK", Side::Ask);
+
+    nb::class_<WalkResult>(m, "WalkResult")
+        .def_ro("vwap", &WalkResult::vwap)
+        .def_ro("filled_usdc", &WalkResult::filled_usdc)
+        .def_ro("filled_shares", &WalkResult::filled_shares)
+        .def_ro("levels_consumed", &WalkResult::levels_consumed)
+        .def_ro("worst_price", &WalkResult::worst_price)
+        .def_ro("complete", &WalkResult::complete);
+
+    nb::class_<OrderBook>(m, "OrderBook")
+        .def(nb::init<>())
+        .def("apply_snapshot",
+             [](OrderBook& b, Levels bids, Levels asks) { b.apply_snapshot(flat(bids), flat(asks)); },
+             "bids"_a, "asks"_a, "Replace the book with (price, size) rows.")
+        .def("apply_delta", &OrderBook::apply_delta, "side"_a, "price"_a, "size"_a)
+        .def("clear", &OrderBook::clear)
+        .def("best_bid", &OrderBook::best_bid)
+        .def("best_ask", &OrderBook::best_ask)
+        .def("mid", &OrderBook::mid)
+        .def("spread", &OrderBook::spread)
+        .def("microprice", &OrderBook::microprice)
+        .def("depth", &OrderBook::depth, "side"_a, "ticks_from_best"_a)
+        .def("walk", &OrderBook::walk, "side"_a, "notional_usdc"_a)
+        .def("imbalance", &OrderBook::imbalance, "levels"_a = 5)
+        .def("crossed", &OrderBook::crossed)
+        .def("level_count", &OrderBook::level_count, "side"_a);
 }
