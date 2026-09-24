@@ -2815,6 +2815,9 @@ git commit -m "feat(api): Data API, Gamma and CLOB clients with bias-safe pagina
 
 `tests/test_store.py`:
 ```python
+import subprocess
+import sys
+
 import pandas as pd
 import pytest
 
@@ -2916,6 +2919,25 @@ def test_second_writer_gets_a_clear_lock_error(tmp_path):
     with Store(tmp_path / "db.duckdb"):
         with pytest.raises(LockedError, match="another whalescan process"):
             Store(tmp_path / "db.duckdb")
+
+
+def test_lock_is_released_when_holder_is_sigkilled(tmp_path):
+    # flock locks belong to the process, not the file: a SIGKILL'd holder leaves db.lock on disk
+    # but the OS releases the lock, so the next run must start normally.
+    lock_path = tmp_path / "db.lock"
+    code = (f"import time; from pathlib import Path; from whalescan.store import ProcessLock; "
+            f"ProcessLock(Path({str(lock_path)!r})).acquire(); print('held', flush=True); time.sleep(60)")
+    holder = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        with pytest.raises(LockedError):
+            Store(tmp_path / "db.duckdb")
+    finally:
+        holder.kill()
+        holder.wait()
+    assert lock_path.exists()
+    with Store(tmp_path / "db.duckdb"):
+        pass
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -6296,5 +6318,17 @@ Expected: the `ci` run is green; the `snapshot` run completes (the first full ru
 ---
 
 ## After this plan
+
+Design decisions already made for Plan 2 (measured 2026-09-24 on the 200 most active tokens: ~1,100 WS
+messages/s carrying ~2,200 book deltas/s; Python `json.loads` ≈ 3.3 µs per message, i.e. < 0.5% of one core):
+- **Transport stays in Python** (`websockets` + asyncio). A C++ WebSocket client would add TLS, reconnect and
+  build complexity to save a cost that is already negligible, and gating needs Python anyway.
+- **Batch the C++ boundary:** one `apply_deltas(side[], price[], size[])` call per WS message instead of one call
+  per delta.
+- **Book storage:** replace `std::map` with a fixed array indexed by tick (prices live in [0, 1], so at most
+  10,001 slots per side) plus cached best-bid/best-ask indices — O(1) updates, no allocation, no Abseil
+  dependency. Only if profiling shows the book mattering; the `OrderBook` interface stays identical.
+- **Off-grid prices:** `apply_delta` rejects a price that is not within 1e-9 of the 0.0001 grid (every
+  Polymarket tick size, 0.1 down to 0.0001, is a multiple of it), and the stream layer resnapshots that token.
 
 Write **Plan 2 — Live Station** against the code as it now exists: reconnecting WebSocket client (`stream/ws_base.py`), RTDS ingest, CLOB market WebSocket watch set feeding `whalecore.OrderBook` deltas with crossed-book resync, FastAPI + WebSocket push to the dashboard (`data.ts` gains live mode), STALE re-evaluation, `data/live.duckdb` + `scores.parquet` reload, and the end-of-project "under the hood" walkthrough.
