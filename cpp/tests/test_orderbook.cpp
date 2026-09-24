@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
 
@@ -119,4 +120,36 @@ TEST_CASE("invalid input throws") {
     REQUIRE_THROWS_AS(b.apply_delta(Side::Bid, 1.5, 1.0), std::invalid_argument);
     REQUIRE_THROWS_AS(b.apply_delta(Side::Bid, 0.5, -1.0), std::invalid_argument);
     REQUIRE_THROWS_AS(b.walk(Side::Ask, 0.0), std::invalid_argument);
+}
+
+TEST_CASE("apply_deltas equals applying each delta in order") {
+    auto a = make_book();
+    auto b = make_book();
+    std::vector<std::uint8_t> sides{0, 1, 1, 0};
+    std::vector<double> prices{0.40, 0.50, 0.49, 0.41};
+    std::vector<double> sizes{0.0, 0.0, 30.0, 5.0};
+    a.apply_deltas(sides, prices, sizes);
+    for (std::size_t i = 0; i < sides.size(); ++i)
+        b.apply_delta(sides[i] ? Side::Ask : Side::Bid, prices[i], sizes[i]);
+    REQUIRE(*a.best_bid() == *b.best_bid());
+    REQUIRE(*a.best_ask() == *b.best_ask());
+    REQUIRE(a.level_count(Side::Bid) == b.level_count(Side::Bid));
+    REQUIRE_THAT(*a.best_bid(), WithinAbs(0.41, 1e-12));
+    REQUIRE_THAT(*a.best_ask(), WithinAbs(0.49, 1e-12));
+}
+
+TEST_CASE("apply_deltas rejects mismatched lengths") {
+    auto b = make_book();
+    std::vector<std::uint8_t> sides{0};
+    std::vector<double> prices{0.4, 0.5}, sizes{1.0};
+    REQUIRE_THROWS_AS(b.apply_deltas(sides, prices, sizes), std::invalid_argument);
+}
+
+TEST_CASE("prices off the 0.0001 grid are rejected, grid prices are exact") {
+    OrderBook b;
+    REQUIRE_THROWS_AS(b.apply_delta(Side::Bid, 0.40005, 1.0), std::invalid_argument);
+    b.apply_delta(Side::Bid, 0.0001, 1.0);
+    b.apply_delta(Side::Ask, 0.9999, 1.0);
+    REQUIRE_THAT(*b.best_bid(), WithinAbs(0.0001, 1e-15));
+    REQUIRE_THAT(*b.best_ask(), WithinAbs(0.9999, 1e-15));
 }

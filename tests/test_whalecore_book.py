@@ -31,3 +31,13 @@ def test_bad_price_raises_value_error():
     b = whalecore.OrderBook()
     with pytest.raises(ValueError):
         b.apply_delta(whalecore.Side.BID, 2.0, 1.0)
+
+
+def test_apply_deltas_from_numpy_and_off_grid_rejection():
+    b = whalecore.OrderBook()
+    b.apply_snapshot(levels((0.40, 100.0)), levels((0.50, 100.0)))
+    b.apply_deltas(np.array([0, 1], dtype=np.uint8), np.array([0.41, 0.49]), np.array([10.0, 20.0]))
+    assert b.best_bid() == pytest.approx(0.41) and b.best_ask() == pytest.approx(0.49)
+    with pytest.raises(ValueError, match="grid"):
+        b.apply_deltas(np.array([0], dtype=np.uint8), np.array([0.41005]), np.array([1.0]))
+    assert b.best_bid() == pytest.approx(0.41)  # rejected batch changed nothing

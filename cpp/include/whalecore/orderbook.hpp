@@ -30,6 +30,9 @@ public:
     void apply_snapshot(std::span<const double> bids, std::span<const double> asks);
     // size == 0 removes the level.
     void apply_delta(Side side, double price, double size);
+    // One WS message worth of deltas in order; sides[i] is 0 = bid, 1 = ask. Validates before mutating.
+    void apply_deltas(std::span<const std::uint8_t> sides, std::span<const double> prices,
+                      std::span<const double> sizes);
     void clear();
 
     std::optional<double> best_bid() const;

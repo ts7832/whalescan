@@ -89,6 +89,11 @@ NB_MODULE(whalecore, m) {
              [](OrderBook& b, Levels bids, Levels asks) { b.apply_snapshot(flat(bids), flat(asks)); },
              "bids"_a, "asks"_a, "Replace the book with (price, size) rows.")
         .def("apply_delta", &OrderBook::apply_delta, "side"_a, "price"_a, "size"_a)
+        .def("apply_deltas",
+             [](OrderBook& b, Vec<std::uint8_t> sides, Vec<double> prices, Vec<double> sizes) {
+                 b.apply_deltas(as_span(sides), as_span(prices), as_span(sizes));
+             },
+             "sides"_a, "prices"_a, "sizes"_a, "Apply a batch of deltas (side 0 = bid, 1 = ask) in order.")
         .def("clear", &OrderBook::clear)
         .def("best_bid", &OrderBook::best_bid)
         .def("best_ask", &OrderBook::best_ask)

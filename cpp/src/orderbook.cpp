@@ -56,7 +56,12 @@ double top_size(const Map& book, int levels) {
 
 std::int32_t OrderBook::to_ticks(double price) {
     if (!(price >= 0.0 && price <= 1.0)) throw std::invalid_argument("price must be within [0, 1]");
-    return static_cast<std::int32_t>(std::llround(price * kTicksPerUnit));
+    const double scaled = price * kTicksPerUnit;
+    const double rounded = std::nearbyint(scaled);
+    // Every Polymarket tick size (0.1 .. 0.0001) is a multiple of 0.0001; anything else means a corrupt
+    // message, and silently rounding it would merge distinct levels.
+    if (std::abs(scaled - rounded) > 1e-6) throw std::invalid_argument("price is not on the 0.0001 tick grid");
+    return static_cast<std::int32_t>(rounded);
 }
 
 double OrderBook::to_price(std::int32_t ticks) { return ticks / kTicksPerUnit; }
@@ -74,6 +79,19 @@ void OrderBook::apply_delta(Side side, double price, double size) {
     } else {
         if (size == 0.0) asks_.erase(t); else asks_[t] = size;
     }
+}
+
+void OrderBook::apply_deltas(std::span<const std::uint8_t> sides, std::span<const double> prices,
+                             std::span<const double> sizes) {
+    if (sides.size() != prices.size() || sides.size() != sizes.size())
+        throw std::invalid_argument("sides, prices and sizes must have equal length");
+    for (std::size_t i = 0; i < sides.size(); ++i) {  // validate everything first: all-or-nothing
+        if (sides[i] > 1) throw std::invalid_argument("side must be 0 (bid) or 1 (ask)");
+        check_size(sizes[i]);
+        to_ticks(prices[i]);
+    }
+    for (std::size_t i = 0; i < sides.size(); ++i)
+        apply_delta(sides[i] ? Side::Ask : Side::Bid, prices[i], sizes[i]);
 }
 
 void OrderBook::clear() {
