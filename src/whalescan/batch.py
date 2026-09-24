@@ -85,16 +85,21 @@ async def discover_universe(apis: Apis, store: Store, cfg: Config, now: int) -> 
     for wallet, _ in sorted(volume.items(), key=lambda kv: -kv[1]):
         sources.setdefault(wallet, "large_trades")
     store.set_wallet_names(names)
-    return dict(list(sources.items())[:u.max_wallets])
+    universe = dict(list(sources.items())[:u.max_wallets])
+    log.info("universe: %d wallets (%d from leaderboards, %d large trades seen)", len(universe),
+             sum(1 for s in universe.values() if s == "leaderboard"), len(page.trades))
+    return universe
 
 
 async def refresh_positions(apis: Apis, store: Store, wallets: Mapping[str, str], concurrency: int, now: int) -> int:
     state = store.wallet_state()
     sem = asyncio.Semaphore(concurrency)
     failures = 0
+    done = 0
+    step = max(1, len(wallets) // 20)
 
     async def one(wallet: str, source: str) -> None:
-        nonlocal failures
+        nonlocal failures, done
         prev = state.get(wallet)
         since = prev.max_ts if prev and prev.complete and prev.max_ts is not None else None
         async with sem:
@@ -104,6 +109,9 @@ async def refresh_positions(apis: Apis, store: Store, wallets: Mapping[str, str]
             return
         store.upsert_positions(hist.positions)
         store.record_wallet_fetch(wallet, fetched_at=now, complete=hist.complete, source=source)
+        done += 1
+        if done % step == 0 or done == len(wallets):
+            log.info("positions: %d/%d wallets", done, len(wallets))
 
     await asyncio.gather(*(one(w, s) for w, s in wallets.items()))
     return failures

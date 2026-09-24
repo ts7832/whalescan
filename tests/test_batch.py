@@ -202,3 +202,13 @@ def test_cli_quiets_per_request_http_logs(monkeypatch):
     assert logging.getLogger("httpx").level == logging.WARNING
     assert cli.main(["-v", "batch", "--skip-validation"]) == 0
     assert logging.getLogger("httpx").level == logging.DEBUG
+
+
+async def test_long_phases_log_progress(tmp_path, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="whalescan.batch")
+    await run(tmp_path, world(), skip_validation=True)
+    text = caplog.text
+    assert "positions: 31/31 wallets" in text
+    assert "universe: 31 wallets" in text
