@@ -196,3 +196,37 @@ async def test_backoff_is_not_reset_by_connections_that_die_before_any_message()
                            backoff_min_s=1.0, backoff_max_s=8.0, sleep=fake_sleep)
         await asyncio.wait_for(c.run(), 5)
     assert delays == [1.0, 2.0, 4.0]
+
+
+async def test_stop_interrupts_a_long_backoff():
+    c = ReconnectingWS("down", "ws://127.0.0.1:9", subscribe=lambda: [], on_message=lambda raw: None,
+                       rng=lambda: 0.5, backoff_min_s=30.0, backoff_max_s=60.0)
+    task = asyncio.create_task(c.run())
+    await asyncio.sleep(0.3)          # connect fails fast, then it sleeps ~30 s
+    c.stop()
+    await asyncio.wait_for(task, 1.0)  # must not wait out the backoff
+
+
+async def test_reconnect_now_cuts_a_backoff_short():
+    async def handler(ws, n, srv):
+        await recv_all(ws, srv)
+
+    async with Server(handler) as srv:
+        port = srv.url.rsplit(":", 1)[1]
+    # server is gone now: the client will back off; start a new one on the same port, then poke the client
+    c = ReconnectingWS("t", f"ws://127.0.0.1:{port}", subscribe=lambda: ["SUB"], on_message=lambda raw: None,
+                       rng=lambda: 0.5, backoff_min_s=30.0, backoff_max_s=60.0)
+    task = asyncio.create_task(c.run())
+    await asyncio.sleep(0.3)
+    got = []
+
+    async def handler2(ws):
+        got.append(await ws.recv())
+        await ws.wait_closed()
+
+    srv2 = await serve(handler2, "127.0.0.1", int(port))
+    c.reconnect_now()
+    await wait_for(lambda: got == ["SUB"], timeout=2.0)
+    c.stop()
+    srv2.close()
+    await asyncio.wait_for(task, 2)

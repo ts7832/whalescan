@@ -61,6 +61,9 @@ def main(argv: list[str] | None = None) -> int:
         cfg = replace(cfg, universe=replace(cfg.universe, max_wallets=args.max_wallets))
     try:
         if args.cmd == "live":
+            if args.host not in ("127.0.0.1", "localhost", "::1"):
+                print(f"WARNING: binding {args.host} exposes the station to your network with no authentication",
+                      file=sys.stderr)
             print(f"WHALESCAN live -> http://{args.host}:{args.port}  (Ctrl-C to stop)")
             try:
                 asyncio.run(Station(cfg).run(args.host, args.port))

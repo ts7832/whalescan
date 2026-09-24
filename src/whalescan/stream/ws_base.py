@@ -41,6 +41,7 @@ class ReconnectingWS:
         self._stopped = False
         self._ws: Any = None
         self._skip_backoff = False
+        self._wake = asyncio.Event()  # set by stop()/reconnect_now() to cut a backoff sleep short
         self._session_messages = 0
         self.messages = 0
         self.connects = 0
@@ -53,18 +54,29 @@ class ReconnectingWS:
 
     def stop(self) -> None:
         self._stopped = True
+        self._wake.set()
         if self._ws is not None:
             asyncio.ensure_future(self._ws.close())
 
     def reconnect_now(self) -> None:
         """Drop the current connection and reconnect immediately (e.g. the subscription set changed)."""
         self._skip_backoff = True
+        self._wake.set()
         if self._ws is not None:
             asyncio.ensure_future(self._ws.close())
 
     def _delay(self, attempt: int) -> float:
         base = min(self._backoff_max, self._backoff_min * 2**attempt)
         return min(self._backoff_max, base * (0.5 + self._rng()))  # jitter: spread reconnect storms
+
+    async def _interruptible_sleep(self, delay: float) -> None:
+        if self._sleep is not asyncio.sleep:  # injected clock (tests): keep it deterministic
+            await self._sleep(delay)
+            return
+        try:
+            await asyncio.wait_for(self._wake.wait(), delay)
+        except TimeoutError:
+            pass
 
     async def _pinger(self, ws: Any) -> None:
         while True:
@@ -100,6 +112,7 @@ class ReconnectingWS:
     async def run(self) -> None:
         attempt = 0
         while not self._stopped:
+            self._wake.clear()  # a stop()/reconnect_now() from here on cuts the next backoff short
             try:
                 async with connect(self.url, ping_interval=self._ping_interval, ping_timeout=self._ping_interval * 2,
                                    max_size=None, open_timeout=20) as ws:
@@ -121,5 +134,6 @@ class ReconnectingWS:
             delay = self._delay(attempt)
             attempt += 1
             self._status("backoff", seconds=round(delay, 2))
-            await self._sleep(delay)
+            await self._interruptible_sleep(delay)
+            self._skip_backoff = False
         self._status("stopped")
