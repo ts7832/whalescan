@@ -198,3 +198,30 @@ async def test_gamma_failed_chunk_does_not_lose_the_others():
     markets = await api.markets([f"0x{i}" for i in range(150)])
     assert len(markets) == 50 and "0x0" not in markets and "0x99" in markets  # ids sort as text
     assert api.skipped >= 1
+
+
+async def test_wallet_profile_combines_creation_time_and_markets_traded():
+    def handler(request):
+        if request.url.path == "/public-profile":
+            assert request.url.params["address"] == "0xw"
+            return httpx.Response(200, json={"createdAt": "2026-09-23T10:00:00.5Z", "proxyWallet": "0xw"})
+        assert request.url.path == "/traded" and request.url.params["user"] == "0xw"
+        return httpx.Response(200, json={"user": "0xw", "traded": 3})
+
+    from whalescan.api.profiles import fetch_profile
+    h = http(handler)
+    p = await fetch_profile(GammaApi(h), DataApi(h), "0xW", now=1_790_000_000)
+    assert p.wallet == "0xw" and p.markets_traded == 3 and p.fetched_at == 1_790_000_000
+    assert p.created_ts == 1790157600
+
+
+async def test_wallet_profile_tolerates_unknown_accounts():
+    def handler(request):
+        if request.url.path == "/public-profile":
+            return httpx.Response(404, json={"error": "profile not found"})
+        return httpx.Response(200, json={"user": "0xw", "traded": 0})
+
+    from whalescan.api.profiles import fetch_profile
+    h = http(handler)
+    p = await fetch_profile(GammaApi(h), DataApi(h), "0xw", now=5)
+    assert p.created_ts is None and p.markets_traded == 0

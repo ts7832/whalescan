@@ -11,6 +11,7 @@ from whalescan.validate import make_folds, run_validation
 
 DAY = 86400
 BASE = load_config()
+BASE = replace(BASE, gate=replace(BASE.gate, skill_mode="certified"))
 CFG = replace(BASE, validation=replace(BASE.validation, n_sims=5000))
 
 

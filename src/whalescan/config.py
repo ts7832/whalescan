@@ -59,6 +59,7 @@ class ScoringCfg:
 
 @dataclass(frozen=True)
 class GateCfg:
+    skill_mode: str
     aggregation_window_s: int
     min_usdc: float
     conviction_k: float
@@ -74,6 +75,29 @@ class GateCfg:
     fallback_max_cat_positions: int
     signal_lookback_h: float
     max_contacts: int
+
+
+@dataclass(frozen=True)
+class SniperCfg:
+    min_positions: int
+    max_positions: int
+    min_win_rate: float
+    min_median_stake: float
+    max_p_value: float
+
+
+@dataclass(frozen=True)
+class InsiderCfg:
+    max_age_days: float
+    tier_a_age_days: float
+    max_markets: int
+    min_usdc: float
+    tier_a_usdc: float
+    price_min: float
+    price_max: float
+    max_slippage: float
+    categories: tuple[str, ...]
+    profile_ttl_h: float
 
 
 @dataclass(frozen=True)
@@ -106,6 +130,8 @@ class Config:
     universe: UniverseCfg
     scoring: ScoringCfg
     gate: GateCfg
+    sniper: SniperCfg
+    insider: InsiderCfg
     validation: ValidationCfg
     blocklist: BlocklistCfg
     categories: CategoriesCfg
@@ -139,6 +165,8 @@ def load_config(path: Path | None = None) -> Config:
         universe=_section(UniverseCfg, "universe", raw["universe"]),
         scoring=_section(ScoringCfg, "scoring", raw["scoring"]),
         gate=_section(GateCfg, "gate", raw["gate"]),
+        sniper=_section(SniperCfg, "sniper", raw["sniper"]),
+        insider=_section(InsiderCfg, "insider", raw["insider"]),
         validation=_section(ValidationCfg, "validation", raw["validation"]),
         blocklist=_section(BlocklistCfg, "blocklist", raw["blocklist"]),
         categories=CategoriesCfg(

@@ -44,6 +44,9 @@ lottery_share = 0.60
 mm_both_sides_share = 0.30
 
 [gate]
+# "sniper": the only historical-edge signal is a rare, huge-winning, big-bet wallet ([sniper]).
+# "certified": any wallet certified by the FDR-controlled skill test (the original mode).
+skill_mode = "sniper"
 aggregation_window_s = 600
 min_usdc = 5000
 conviction_k = 2.0
@@ -59,6 +62,28 @@ conflict_window_h = 24
 fallback_max_cat_positions = 10
 signal_lookback_h = 24
 max_contacts = 300
+
+[sniper]
+# Old accounts that trade rarely, win at an extreme rate and bet big. Still significance-tested, so a wallet
+# that only buys heavy favourites (easy 90% win rate, no edge) is not a sniper.
+min_positions = 8
+max_positions = 50
+min_win_rate = 0.80
+min_median_stake = 5000
+max_p_value = 0.01
+
+[insider]
+# Fresh-wallet insider pattern: no history needed (see Plan 2 addendum for the evidence).
+max_age_days = 7
+tier_a_age_days = 2
+max_markets = 10
+min_usdc = 10000
+tier_a_usdc = 25000
+price_min = 0.02
+price_max = 0.90
+max_slippage = 0.05
+categories = ["POLITICS", "GEOPOLITICS", "ECONOMY", "TECH", "CULTURE", "OTHER"]
+profile_ttl_h = 24
 
 [validation]
 fold_days = 14

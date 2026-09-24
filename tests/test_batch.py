@@ -18,7 +18,9 @@ DAY = 86400
 
 
 def config(tmp):
-    return replace(load_config(), paths=PathsCfg(research_db=str(tmp / "research.duckdb"),
+    base = load_config()
+    base = replace(base, gate=replace(base.gate, skill_mode="certified"))
+    return replace(base, paths=PathsCfg(research_db=str(tmp / "research.duckdb"),
                                                  scores_parquet=str(tmp / "scores.parquet"),
                                                  snapshot_dir=str(tmp / "snapshot")))
 

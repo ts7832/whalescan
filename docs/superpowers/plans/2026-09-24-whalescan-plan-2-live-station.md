@@ -56,3 +56,12 @@ one whole-branch review at the end.
 | 6 | `live.py` runner + FastAPI server + `whalescan live` CLI | `/api/state` + `/ws` broadcast via TestClient with a fake feed; CLI wiring |
 | 7 | Web live mode (reducer, connection, status bar LINK/LAT) | vitest reducer tests; build |
 | 8 | Real run ≥ 5 min against Polymarket; README live section | manual: log excerpt recorded in ledger |
+
+## Addendum (2026-09-24): fresh-wallet insider detector
+
+User requirement: little history can itself be the signal. Evidence (last-30-days ≥$10k resolved buys, one row per
+wallet-market position): fresh wallets (≤7 d) in news markets 31 positions / 5 wallets, 90% hit, +25¢/share;
+in sports 660 / 56 wallets, +3¢ (noise). Fresh + concentrated sports bettors lost (incl. $2.27M and $1.73M).
+Design: separate alert kind INSIDER, rules I1–I6 (BUY; age ≤ 7 d at first fill; ≤ 10 markets ever traded; ≥ $10k;
+news-category, open, non-blocklisted market; follow slippage ≤ 5¢), tier A at ≤ 2 d and ≥ $25k. Profiles from
+Gamma `/public-profile` (createdAt) and Data API `/traded`, cached 24 h in `wallet_profiles`. Its own backtest group.

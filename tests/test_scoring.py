@@ -123,3 +123,11 @@ def test_prepare_winsorizes_stakes_per_wallet():
     out = prepare_positions(frame, CFG.scoring, CFG.categories, Blocklist(CFG.blocklist)).set_index("asset")
     assert out.loc["whale", "w"] < out.loc["whale", "stake"]
     assert out.loc["a0", "w"] == out.loc["a0", "stake"]
+
+
+def test_win_rate_is_reported_per_test():
+    eligible = synthetic(n_null=3, n_skilled=0, per=40)
+    scores = score_wallets(eligible, pd.Series(dtype=object), SC, as_of=0)
+    one = eligible[eligible.wallet == "0xnull0"]
+    got = scores[(scores.wallet == "0xnull0") & (scores.category == "ALL")].win_rate.iloc[0]
+    assert np.isclose(got, one.y.mean())

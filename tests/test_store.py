@@ -178,3 +178,13 @@ def test_old_trades_primary_key_is_migrated_without_losing_rows(tmp_path):
         extra = Trade("0x1", 1, "0xw", "a1", "0xc1", "BUY", 0.41, 50.0, "ev", "t", "Yes", 0, None)
         s.upsert_trades([extra])
         assert len(s.trades_frame()) == 2
+
+
+def test_wallet_profiles_roundtrip_and_staleness(tmp_path):
+    from whalescan.models import WalletProfile
+    with Store(tmp_path / "db.duckdb") as s:
+        s.upsert_profiles([WalletProfile("0xa", 100, 3, 1000), WalletProfile("0xb", None, None, 10)])
+        got = s.profiles(["0xa", "0xb", "0xc"])
+        assert got["0xa"] == WalletProfile("0xa", 100, 3, 1000) and got["0xb"].created_ts is None
+        assert "0xc" not in got
+        assert s.stale_profiles(["0xa", "0xb", "0xc"], now=1500, ttl_s=600) == {"0xb", "0xc"}

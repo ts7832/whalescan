@@ -8,7 +8,7 @@ import logging
 
 from whalescan.api.http import ApiError, BlockedError, HttpClient
 from whalescan.models import Market
-from whalescan.parsers import parse_many, parse_market
+from whalescan.parsers import iso_to_ts, parse_many, parse_market
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +20,18 @@ class GammaApi:
     def __init__(self, http: HttpClient) -> None:
         self._http = http
         self.skipped = 0
+
+    async def created_ts(self, wallet: str) -> int | None:
+        """Account creation time (unix s) from the public profile; None if Polymarket has no profile."""
+        try:
+            data = await self._http.get_json(f"{GAMMA_API}/public-profile", [("address", wallet)])
+        except BlockedError:
+            raise
+        except ApiError as e:
+            if e.status == 404:
+                return None
+            raise
+        return iso_to_ts(data.get("createdAt")) if isinstance(data, dict) else None
 
     async def markets(self, condition_ids: Iterable[str]) -> dict[str, Market]:
         """Metadata for the given markets. Gamma hides closed markets unless asked, so query closed

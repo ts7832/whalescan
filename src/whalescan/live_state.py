@@ -146,7 +146,7 @@ class LiveState:
     # ---------------------------------------------------------------- internals
 
     def _set_scores(self, scores: pd.DataFrame) -> None:
-        self.scores = ScoreBook(scores, self.g.fallback_max_cat_positions)
+        self.scores = ScoreBook.for_config(scores, self.cfg)
         self._certified = self.scores.certified_wallets()
 
     def _ids(self, ids: Iterable[str]) -> list[PositionEvent]:

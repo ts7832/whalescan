@@ -13,7 +13,7 @@ from typing import Any
 import duckdb
 import pandas as pd
 
-from whalescan.models import ClosedPosition, Market, Trade, resolved_winner
+from whalescan.models import ClosedPosition, Market, Trade, WalletProfile, resolved_winner
 
 # One order can sweep several price levels in one transaction: every (price, size) is a separate fill.
 TRADE_KEY = ["tx_hash", "wallet", "asset", "side", "price", "size"]
@@ -39,15 +39,18 @@ CREATE TABLE IF NOT EXISTS wallet_scores (
   wallet VARCHAR, category VARCHAR, n INTEGER, n_eff DOUBLE, edge DOUBLE, sigma DOUBLE, post_edge DOUBLE,
   p_value DOUBLE, bh_pass BOOLEAN, certified BOOLEAN, flags VARCHAR, median_stake DOUBLE, as_of BIGINT,
   PRIMARY KEY (wallet, category));
+ALTER TABLE wallet_scores ADD COLUMN IF NOT EXISTS win_rate DOUBLE;
 CREATE TABLE IF NOT EXISTS meta (key VARCHAR PRIMARY KEY, value VARCHAR);
 CREATE TABLE IF NOT EXISTS missing_markets (condition_id VARCHAR PRIMARY KEY, fetched_at BIGINT);
+CREATE TABLE IF NOT EXISTS wallet_profiles (
+  wallet VARCHAR PRIMARY KEY, created_ts BIGINT, markets_traded INTEGER, fetched_at BIGINT);
 """
 
 TRADE_COLS = [f.name for f in fields(Trade)]
 POSITION_COLS = [f.name for f in fields(ClosedPosition)]
 MARKET_COLS = [f.name for f in fields(Market)]
 SCORE_COLS = ["wallet", "category", "n", "n_eff", "edge", "sigma", "post_edge", "p_value", "bh_pass",
-              "certified", "flags", "median_stake", "as_of"]
+              "certified", "flags", "median_stake", "as_of", "win_rate"]
 
 
 class LockedError(RuntimeError):
@@ -282,10 +285,28 @@ class Store:
 
     def replace_scores(self, df: pd.DataFrame) -> None:
         self.con.execute("DELETE FROM wallet_scores")
-        self._upsert_frame("wallet_scores", df[SCORE_COLS], ["wallet", "category"])
+        self._upsert_frame("wallet_scores", df.reindex(columns=SCORE_COLS), ["wallet", "category"])
 
     def scores_frame(self) -> pd.DataFrame:
         return self.con.execute(f"SELECT {', '.join(SCORE_COLS)} FROM wallet_scores").df()
+
+    def upsert_profiles(self, profiles: Iterable[WalletProfile]) -> None:
+        rows = [(p.wallet, p.created_ts, p.markets_traded, p.fetched_at) for p in profiles]
+        if rows:
+            self.con.executemany("INSERT OR REPLACE INTO wallet_profiles VALUES (?, ?, ?, ?)", rows)
+
+    def profiles(self, wallets: Iterable[str]) -> dict[str, WalletProfile]:
+        ids = list(wallets)
+        if not ids:
+            return {}
+        rows = self.con.execute("SELECT * FROM wallet_profiles WHERE wallet IN (SELECT unnest(?))", [ids]).fetchall()
+        return {w: WalletProfile(w, _opt_int(c), _opt_int(m), int(f)) for w, c, m, f in rows}
+
+    def stale_profiles(self, wallets: Iterable[str], *, now: int, ttl_s: int) -> set[str]:
+        """Wallets whose profile is missing, older than ttl, or unknown (no creation time) and worth retrying."""
+        ids = set(wallets)
+        fresh = {w for w, p in self.profiles(ids).items() if p.fetched_at >= now - ttl_s and p.created_ts is not None}
+        return ids - fresh
 
     def get_meta(self, key: str) -> str | None:
         row = self.con.execute("SELECT value FROM meta WHERE key = ?", [key]).fetchone()

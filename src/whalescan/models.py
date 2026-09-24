@@ -106,3 +106,14 @@ class BookSnapshot:
 class PricePoint:
     ts: int
     price: float
+
+
+@dataclass(frozen=True, slots=True)
+class WalletProfile:
+    """What an account looks like from the outside: when it was created and how many markets it has traded.
+    Fresh accounts making big bets are the insider pattern WHALESCAN is built around."""
+
+    wallet: str
+    created_ts: int | None
+    markets_traded: int | None
+    fetched_at: int

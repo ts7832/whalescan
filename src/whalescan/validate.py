@@ -60,7 +60,7 @@ def run_validation(eligible: pd.DataFrame, flags: pd.Series, trades: list[Trade]
             scores = score_wallets(train, flags, cfg.scoring, as_of=fold.cutoff, n_sims=v.n_sims)
             events = aggregate([t for t in trades if fold.cutoff <= t.ts < fold.end], g.aggregation_window_s)
             ctx = GateContext(cfg=g, categories=cfg.categories, blocklist=blocklist,
-                              scores=ScoreBook(scores, g.fallback_max_cat_positions), markets=markets,
+                              scores=ScoreBook.for_config(scores, cfg), markets=markets,
                               events=events, now=None, historical=True)
             fold_rets = []
             for ev in events:

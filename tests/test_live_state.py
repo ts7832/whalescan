@@ -10,6 +10,7 @@ from whalescan.scoring import SCORE_COLUMNS
 from whalescan.stream.messages import PriceChanges
 
 CFG = load_config()
+CFG = replace(CFG, gate=replace(CFG.gate, skill_mode="certified"))
 NOW = 1_790_000_000
 H = 3600
 

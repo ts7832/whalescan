@@ -17,7 +17,7 @@ H = 3600
 def score(wallet, category, certified, post_edge=0.06, n=100, edge=0.08, median_stake=2000.0):
     return {"wallet": wallet, "category": category, "n": n, "n_eff": n, "edge": edge, "sigma": 0.02,
             "post_edge": post_edge, "p_value": 0.001 if certified else 0.5, "bh_pass": certified,
-            "certified": certified, "flags": "", "median_stake": median_stake, "as_of": NOW}
+            "certified": certified, "flags": "", "median_stake": median_stake, "as_of": NOW, "win_rate": 0.6}
 
 
 def book(*rows, fallback=CFG.gate.fallback_max_cat_positions):
@@ -180,3 +180,37 @@ def test_historical_mode_ignores_events_from_the_future():
     assert hist.status == "SIGNAL" and hist.consensus == ("0xwhale",)
     earlier_bear = event(wallet="0xbear", asset="no", price=0.6, ts=NOW - H)
     assert evaluate(ev, ctx(scores=scores, events=[earlier_bear], now=None, historical=True), quote()).status == "CONFLICT"
+
+
+# ---------------------------------------------------------------- sniper mode (the only historical-edge signal)
+
+def sniper_book(**overrides):
+    base = score("0xsniper", "ALL", False, post_edge=0.0, edge=0.40, median_stake=8000.0)
+    base.update(n=12, n_eff=11.0, sigma=0.12, p_value=0.002, win_rate=0.917)
+    base.update(overrides)
+    return ScoreBook(pd.DataFrame([base], columns=SCORE_COLUMNS), CFG.gate.fallback_max_cat_positions,
+                     mode="sniper", sniper=CFG.sniper)
+
+
+def test_rare_big_winner_is_a_sniper_with_a_conservative_edge():
+    v = sniper_book().view("0xsniper", "POLITICS")
+    assert v.basis == "SNIPER"
+    assert abs(v.post_edge - (0.40 - 2 * 0.12)) < 1e-12        # lower ~95% bound, not the raw edge
+    assert sniper_book().certified_wallets() == {"0xsniper"}
+
+
+def test_sniper_rules_each_exclude():
+    assert sniper_book(n=200).view("0xsniper", "X").basis == "NONE"            # trades too often
+    assert sniper_book(n=5).view("0xsniper", "X").basis == "NONE"              # too little to judge
+    assert sniper_book(win_rate=0.6).view("0xsniper", "X").basis == "NONE"
+    assert sniper_book(median_stake=500.0).view("0xsniper", "X").basis == "NONE"
+    assert sniper_book(p_value=0.2).view("0xsniper", "X").basis == "NONE"      # e.g. only bought heavy favourites
+    assert sniper_book(flags="FARMER").view("0xsniper", "X").basis == "NONE"
+
+
+def test_high_frequency_certified_wallet_is_not_a_signal_in_sniper_mode():
+    row = score("0xquant", "ALL", True)
+    row.update(n=900, win_rate=0.55)
+    book_ = ScoreBook(pd.DataFrame([row, score("0xquant", "POLITICS", True)], columns=SCORE_COLUMNS),
+                      CFG.gate.fallback_max_cat_positions, mode="sniper", sniper=CFG.sniper)
+    assert book_.view("0xquant", "POLITICS").basis == "NONE"

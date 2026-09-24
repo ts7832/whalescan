@@ -23,6 +23,7 @@ def scores():
 
 def config(tmp):
     base = load_config()
+    base = replace(base, gate=replace(base.gate, skill_mode="certified"))
     return replace(base, paths=PathsCfg(research_db=str(tmp / "r.duckdb"), scores_parquet=str(tmp / "s.parquet"),
                                         snapshot_dir=str(tmp / "snap")))
 

@@ -5,12 +5,13 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import pandas as pd
 
 from whalescan.book import FollowQuote
 from whalescan.classify import Blocklist, category_for_tags
-from whalescan.config import CategoriesCfg, GateCfg
+from whalescan.config import CategoriesCfg, Config, GateCfg, SniperCfg
 from whalescan.models import Market, Trade
 
 
@@ -75,14 +76,38 @@ class WalletView:
 
 
 class ScoreBook:
-    def __init__(self, scores: pd.DataFrame, fallback_max_cat_positions: int) -> None:
+    """Which wallets count as proven. mode="certified": FDR-certified skill (per category, overall fallback).
+    mode="sniper": only rare, huge-winning, big-bet wallets (config [sniper]) — WHALESCAN's default, because
+    its primary signal is the insider detector and generic high-frequency edge is deliberately ignored."""
+
+    def __init__(self, scores: pd.DataFrame, fallback_max_cat_positions: int, *, mode: str = "certified",
+                 sniper: SniperCfg | None = None) -> None:
+        if mode not in ("certified", "sniper") or (mode == "sniper" and sniper is None):
+            raise ValueError(f"bad skill mode {mode!r}")
         self._rows = {(r.wallet, r.category): r for r in scores.itertuples(index=False)}
         self._fallback = fallback_max_cat_positions
+        self._mode, self._sniper = mode, sniper
+
+    @classmethod
+    def for_config(cls, scores: pd.DataFrame, cfg: Config) -> ScoreBook:
+        return cls(scores, cfg.gate.fallback_max_cat_positions, mode=cfg.gate.skill_mode, sniper=cfg.sniper)
+
+    def _is_sniper(self, r: Any) -> bool:
+        s = self._sniper
+        return (str(r.flags) == "" and s.min_positions <= int(r.n) <= s.max_positions
+                and float(getattr(r, "win_rate", 0.0) or 0.0) >= s.min_win_rate
+                and float(r.median_stake) >= s.min_median_stake and float(r.p_value) <= s.max_p_value)
 
     def view(self, wallet: str, category: str) -> WalletView | None:
         overall = self._rows.get((wallet, "ALL"))
         if overall is None:
             return None
+        if self._mode == "sniper":
+            median = float(overall.median_stake)
+            if self._is_sniper(overall):
+                lower = max(0.0, float(overall.edge) - 2.0 * float(overall.sigma))  # ~95% lower bound: few bets
+                return WalletView("SNIPER", lower, float(overall.edge), float(overall.p_value), int(overall.n), median)
+            return WalletView("NONE", 0.0, float(overall.edge), float(overall.p_value), int(overall.n), median)
         cat = self._rows.get((wallet, category))
         median = float(overall.median_stake)
         if cat is not None and bool(cat.certified):
@@ -99,6 +124,8 @@ class ScoreBook:
         return v is not None and v.basis != "NONE"
 
     def certified_wallets(self) -> set[str]:
+        if self._mode == "sniper":
+            return {w for (w, c), r in self._rows.items() if c == "ALL" and self._is_sniper(r)}
         return {w for (w, _), r in self._rows.items() if bool(r.certified)}
 
 

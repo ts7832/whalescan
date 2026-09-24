@@ -157,7 +157,7 @@ async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFr
                         now: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     g = cfg.gate
     since = now - int(g.signal_lookback_h * 3600)
-    book = ScoreBook(scores, g.fallback_max_cat_positions)
+    book = ScoreBook.for_config(scores, cfg)
     sem = asyncio.Semaphore(cfg.http.concurrency)
 
     async def wallet_trades(wallet: str) -> None:

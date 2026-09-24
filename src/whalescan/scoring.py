@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 
 ELIGIBLE_COLUMNS = ["wallet", "condition_id", "asset", "category", "p", "y", "w", "stake", "closed_ts", "title", "outcome"]
 SCORE_COLUMNS = ["wallet", "category", "n", "n_eff", "edge", "sigma", "post_edge", "p_value", "bh_pass",
-                 "certified", "flags", "median_stake", "as_of"]
+                 "certified", "flags", "median_stake", "as_of", "win_rate"]
 
 
 def apply_history_window(frame: pd.DataFrame) -> pd.DataFrame:
@@ -107,7 +107,7 @@ def score_wallets(eligible: pd.DataFrame, flags: pd.Series, scoring: ScoringCfg,
     tests["w2"] = tests["w"] ** 2
     tests["v"] = tests["w2"] * tests["p"] * (1.0 - tests["p"])
     agg = (tests.groupby(["wallet", "category"], sort=False)
-           .agg(n=("p", "size"), sw=("w", "sum"), sv=("v", "sum")).reset_index())
+           .agg(n=("p", "size"), sw=("w", "sum"), sv=("v", "sum"), win_rate=("y", "mean")).reset_index())
     offsets = np.concatenate([[0], np.cumsum(agg["n"].to_numpy())]).astype(np.int64)
     p = np.ascontiguousarray(tests["p"].to_numpy(np.float64))
     y = np.ascontiguousarray(tests["y"].to_numpy(np.uint8))

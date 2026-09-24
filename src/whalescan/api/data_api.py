@@ -132,6 +132,11 @@ class DataApi:
             offset += TRADES_PAGE
         return TradePage(out, False)
 
+    async def markets_traded(self, wallet: str) -> int | None:
+        """How many distinct markets the wallet has ever traded."""
+        data = await self._http.get_json(f"{DATA_API}/traded", [("user", wallet)])
+        return int(data["traded"]) if isinstance(data, dict) and data.get("traded") is not None else None
+
     async def leaderboard(self, *, period: str, order_by: str, pages: int) -> list[LeaderboardEntry]:
         out: list[LeaderboardEntry] = []
         for page in range(pages):
