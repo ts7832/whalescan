@@ -109,6 +109,7 @@ class ValidationCfg:
     max_wallets: int
     every_hours: float
     min_signals: int
+    min_wallets: int
 
 
 @dataclass(frozen=True)

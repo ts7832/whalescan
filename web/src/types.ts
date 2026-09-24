@@ -69,7 +69,7 @@ export interface Whale {
   recent: { title: string; outcome: string; price: number; won: boolean; stake: number; closed_ts: number }[];
 }
 
-export interface GroupStats { n: number; mean_ret: number | null; hit_rate: number | null; t_stat: number | null }
+export interface GroupStats { n: number; mean_ret: number | null; hit_rate: number | null; t_stat: number | null; wallets?: number; wallet_t?: number | null }
 
 export interface Validation {
   generated_at: number;

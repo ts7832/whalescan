@@ -93,6 +93,7 @@ n_sims = 20000
 max_wallets = 300
 every_hours = 24
 min_signals = 30
+min_wallets = 10
 
 [blocklist]
 slug_patterns = ["updown", "up-or-down", "-(5|15)m-"]

@@ -45,10 +45,10 @@ export function ValidationPanel({ validation }: { validation: Validation | null 
           {rows.map(([label, g]) => (
             <tr key={label}>
               <td>{label}</td>
-              <td className="num">{g.n}</td>
+              <td className="num">{g.n}{g.wallets != null ? ` / ${g.wallets}W` : ''}</td>
               <td className={`num ${g.mean_ret != null && g.mean_ret > 0 ? 'green' : 'red'}`}>{fmtCents(g.mean_ret)}</td>
               <td className="num">{fmtPct(g.hit_rate)}</td>
-              <td className="num">{g.t_stat == null ? '—' : g.t_stat.toFixed(2)}</td>
+              <td className="num">{(g.wallet_t ?? g.t_stat) == null ? '—' : (g.wallet_t ?? g.t_stat)!.toFixed(2)}</td>
             </tr>
           ))}
         </tbody>

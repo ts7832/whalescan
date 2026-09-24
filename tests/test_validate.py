@@ -93,3 +93,12 @@ def test_insider_backtest_scores_fresh_news_bets_only():
     out = insider_backtest(trades, markets, profiles, CFG, Blocklist(CFG.blocklist))
     assert out["n"] == 3 and abs(out["hit_rate"] - 2 / 3) < 1e-12
     assert abs(out["mean_ret"] - ((1 - 0.315) * 2 + (0 - 0.315)) / 3) < 1e-9
+    assert out["wallets"] == 3
+
+
+def test_insider_verdict_counts_wallets_not_bets():
+    from whalescan.validate import insider_verdict
+    one_lucky_wallet = {"n": 60, "wallets": 2, "wallet_t": 9.0}
+    assert insider_verdict(one_lucky_wallet, CFG) == "INSUFFICIENT DATA"
+    assert insider_verdict({"n": 60, "wallets": 12, "wallet_t": 2.5}, CFG) == "EDGE CONFIRMED"
+    assert insider_verdict({"n": 60, "wallets": 12, "wallet_t": 1.0}, CFG) == "EDGE NOT CONFIRMED"

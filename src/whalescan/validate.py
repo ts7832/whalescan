@@ -92,7 +92,7 @@ def insider_backtest(trades: list[Trade], markets: Mapping[str, Market], profile
     from whalescan.insider import account_age_days
 
     ic, v, g = cfg.insider, cfg.validation, cfg.gate
-    rets, wins = [], []
+    rets, wallets = [], []
     for ev in aggregate(trades, g.aggregation_window_s):
         m = markets.get(ev.condition_id)
         winner = m.winner_index() if m else None
@@ -108,8 +108,22 @@ def insider_backtest(trades: list[Trade], markets: Mapping[str, Market], profile
         won = 1.0 if ev.outcome_index == winner else 0.0
         follow = min(0.99, ev.price + v.slippage)
         rets.append(won - follow - m.fee_per_share(follow))
-        wins.append(won)
-    return _stats(np.array(rets, dtype=float))
+        wallets.append(ev.wallet)
+    out = _stats(np.array(rets, dtype=float))
+    # Bets by one wallet aren't independent (one insider, one piece of news). Judge wallets, not bets.
+    per_wallet = pd.Series(rets, dtype=float).groupby(pd.Series(wallets, dtype=object)).mean() if rets else pd.Series(dtype=float)
+    k = len(per_wallet)
+    sd = float(per_wallet.std(ddof=1)) if k > 1 else 0.0
+    out["wallets"] = k
+    out["wallet_t"] = float(per_wallet.mean() / (sd / math.sqrt(k))) if k > 1 and sd > 0 else None
+    return out
+
+
+def insider_verdict(stats: dict[str, Any], cfg: Config) -> str:
+    if stats["n"] < cfg.validation.min_signals or stats.get("wallets", 0) < cfg.validation.min_wallets:
+        return "INSUFFICIENT DATA"
+    t = stats.get("wallet_t")
+    return "EDGE CONFIRMED" if t is not None and t >= 2.0 else "EDGE NOT CONFIRMED"
 
 
 def _report(rows: list[dict[str, Any]], fold_rows: list[dict[str, Any]], cfg: Config, now: int) -> dict[str, Any]:

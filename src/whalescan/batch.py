@@ -29,7 +29,7 @@ from whalescan.parsers import ParseError
 from whalescan.scoring import apply_history_window, prepare_positions, score_wallets
 from whalescan.snapshot import evaluation_json, whales_json, write_json_atomic, write_parquet_atomic
 from whalescan.store import Store, trades_from_frame
-from whalescan.validate import insider_backtest, run_validation
+from whalescan.validate import insider_backtest, insider_verdict, run_validation
 
 log = logging.getLogger(__name__)
 MARKET_MAX_AGE_S = 3600
@@ -267,12 +267,14 @@ async def maybe_validate(apis: Apis, store: Store, cfg: Config, eligible: pd.Dat
                     and category_for_tags(m.tags, cfg.categories) in cfg.insider.categories}
     profiles = await _profiles(apis, store, cfg, news_wallets, now)
     report["groups"]["INSIDER"] = insider_backtest(big, big_markets, profiles, cfg, blocklist)
-    n_ins = report["groups"]["INSIDER"]["n"]
-    t_ins = report["groups"]["INSIDER"]["t_stat"]
-    report["insider_verdict"] = ("INSUFFICIENT DATA" if n_ins < cfg.validation.min_signals
-                                 else "EDGE CONFIRMED" if t_ins is not None and t_ins >= 2.0 else "EDGE NOT CONFIRMED")
-    report["caveats"].append("Insider backtest skips the markets-traded rule (only today's count is known) and "
-                             "uses the account creation time from the public profile.")
+    report["insider_verdict"] = insider_verdict(report["groups"]["INSIDER"], cfg)
+    report["caveats"] += [
+        "Insider backtest: the verdict needs >= 10 distinct wallets and uses a per-wallet t-statistic, because one "
+        "insider's many bets on one piece of news are not independent.",
+        "Insider backtest survivorship: older history comes mostly from wallets selected for being active or "
+        "profitable today, so fresh accounts that bet once and vanished are under-represented.",
+        "Insider backtest skips the markets-traded rule (only today's count is known).",
+    ]
     store.set_meta("validation_at", str(now))
     return report
 
