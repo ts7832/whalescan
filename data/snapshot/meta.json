@@ -1,0 +1,1 @@
+{"generated_at":1790267440,"version":"0.1.0","mode":"SNAPSHOT","counts":{"wallets_scanned":300,"wallets_complete":299,"tests":1107,"testable":337,"certified_wallets":8,"signals":0,"contacts":300},"params":{"bh_q":0.1,"min_usdc":5000,"conviction_k":2.0,"follow_size_usdc":1000,"min_net_edge":0.02,"signal_lookback_h":24},"errors":{"api":0},"validation_generated_at":1790267440}
