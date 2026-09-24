@@ -102,22 +102,26 @@ whalescan/
 ### Task 1: Scaffold, build toolchain, config
 
 **Files:**
+
 - Create: `pyproject.toml`, `.python-version`, `.gitignore`, `CMakeLists.txt`, `config.toml`
 - Create: `cpp/include/whalecore/version.hpp`, `cpp/src/version.cpp`, `cpp/src/bindings.cpp`, `cpp/tests/test_version.cpp`, `scripts/test-cpp.sh`
 - Create: `src/whalescan/__init__.py`, `src/whalescan/config.py`
 - Test: `tests/test_build.py`, `tests/test_config.py`
 
 **Interfaces:**
+
 - Produces: `import whalecore; whalecore.version() -> str`; `whalescan.config.load_config(path: Path | None = None) -> Config`; `Config.path(rel: str) -> Path`; dataclasses `PathsCfg, HttpCfg, UniverseCfg, ScoringCfg, GateCfg, ValidationCfg, BlocklistCfg, CategoriesCfg` with exactly the keys in `config.toml` below; `whalescan.config.ROOT: Path`.
 
 - [ ] **Step 1: Write build files**
 
 `.python-version`:
+
 ```
 3.12
 ```
 
 `.gitignore`:
+
 ```
 .venv/
 build/
@@ -135,6 +139,7 @@ web/public/data/
 ```
 
 `pyproject.toml`:
+
 ```toml
 [build-system]
 requires = ["scikit-build-core>=0.10", "nanobind>=2.4"]
@@ -179,6 +184,7 @@ asyncio_default_fixture_loop_scope = "function"
 ```
 
 `CMakeLists.txt`:
+
 ```cmake
 cmake_minimum_required(VERSION 3.26)
 project(whalecore LANGUAGES CXX)
@@ -226,6 +232,7 @@ endif()
 ```
 
 `scripts/test-cpp.sh` (then `chmod +x scripts/test-cpp.sh`):
+
 ```bash
 #!/usr/bin/env bash
 # Build and run the C++ unit tests without Python.
@@ -239,6 +246,7 @@ ctest --test-dir build/cpp --output-on-failure
 - [ ] **Step 2: Write the failing tests**
 
 `cpp/tests/test_version.cpp`:
+
 ```cpp
 #include <catch2/catch_test_macros.hpp>
 #include <string>
@@ -251,6 +259,7 @@ TEST_CASE("version string is semver") {
 ```
 
 `tests/test_build.py`:
+
 ```python
 import whalecore
 
@@ -260,6 +269,7 @@ def test_extension_imports_and_reports_version():
 ```
 
 `tests/test_config.py`:
+
 ```python
 from pathlib import Path
 
@@ -306,6 +316,7 @@ Run: `uv sync` — Expected: FAIL (CMake error: `cpp/src/version.cpp` / `binding
 - [ ] **Step 4: Write the implementation**
 
 `cpp/include/whalecore/version.hpp`:
+
 ```cpp
 #pragma once
 
@@ -315,6 +326,7 @@ const char* version();
 ```
 
 `cpp/src/version.cpp`:
+
 ```cpp
 #include "whalecore/version.hpp"
 
@@ -324,6 +336,7 @@ const char* version() { return "0.1.0"; }
 ```
 
 `cpp/src/bindings.cpp`:
+
 ```cpp
 #include <nanobind/nanobind.h>
 
@@ -338,6 +351,7 @@ NB_MODULE(whalecore, m) {
 ```
 
 `src/whalescan/__init__.py`:
+
 ```python
 """WHALESCAN — statistically certified Polymarket whale scanner."""
 
@@ -345,6 +359,7 @@ __version__ = "0.1.0"
 ```
 
 `config.toml`:
+
 ```toml
 # Every threshold WHALESCAN uses. Paths are relative to the repo root unless absolute.
 
@@ -428,6 +443,7 @@ CULTURE = ["culture", "pop culture", "movies", "music", "awards", "mentions", "t
 ```
 
 `src/whalescan/config.py`:
+
 ```python
 """Typed access to config.toml. Missing or unknown keys are errors, never silent defaults."""
 
@@ -594,15 +610,18 @@ git commit -m "build: scaffold uv + scikit-build-core + nanobind toolchain and t
 ### Task 2: API groundwork — notes, real fixtures, GitHub smoke test
 
 **Files:**
+
 - Create: `docs/polymarket-api-notes.md`, `scripts/record_fixtures.py`, `scripts/smoke.py`, `.github/workflows/smoke.yml`
 - Create (generated): `tests/fixtures/real/*.json`
 
 **Interfaces:**
+
 - Produces: `tests/fixtures/real/{trades_large,closed_positions,leaderboard,markets_closed,markets_open,book,prices_history}.json` — real API payloads (arrays of rows, or a single object for `book`/`prices_history`) used by Task 5 parser tests.
 
 - [ ] **Step 1: Write the API notes**
 
 `docs/polymarket-api-notes.md`:
+
 ```markdown
 # Polymarket public API — verified behaviour (2026-09-24)
 
@@ -647,6 +666,7 @@ rate 0.05, exponent 1 → 23.86944 (exact).
 - [ ] **Step 2: Write the fixture recorder**
 
 `scripts/record_fixtures.py`:
+
 ```python
 """Record small real API payloads into tests/fixtures/real/ for parser tests. Run manually; results are committed."""
 
@@ -705,6 +725,7 @@ Expected: 7 `wrote …` lines; 7 JSON files present. Open `closed_positions.json
 - [ ] **Step 4: Write the smoke test script and workflow**
 
 `scripts/smoke.py` (stdlib only, so it runs before any install):
+
 ```python
 """Fail loudly if any Polymarket endpoint is blocked from this machine (used on GitHub runners)."""
 
@@ -745,6 +766,7 @@ if __name__ == "__main__":
 ```
 
 `.github/workflows/smoke.yml`:
+
 ```yaml
 name: api-smoke
 on:
@@ -773,11 +795,14 @@ Expected: five `OK      200` lines, exit code 0.
 git add -A
 git commit -m "chore: API notes, real fixtures, GitHub runner smoke test"
 ```
+
 **Ask the user before this outward-facing step:** create the public repo and push.
+
 ```bash
 gh repo create whalescan --public --source . --push
 gh workflow run api-smoke && sleep 5 && gh run watch "$(gh run list --workflow api-smoke -L1 --json databaseId -q '.[0].databaseId')"
 ```
+
 Expected: the run succeeds with five `OK` lines. If any line says `BLOCKED`, record it in `docs/polymarket-api-notes.md` under a new `## GitHub runners` heading and tell the user that snapshot publishing will use the local fallback (`whalescan batch --publish`); the plan continues unchanged.
 
 ---
@@ -785,17 +810,20 @@ Expected: the run succeeds with five `OK` lines. If any line says `BLOCKED`, rec
 ### Task 3: C++ Monte Carlo skill engine
 
 **Files:**
+
 - Create: `cpp/include/whalecore/montecarlo.hpp`, `cpp/src/montecarlo.cpp`, `cpp/tests/test_montecarlo.cpp`
 - Modify: `CMakeLists.txt` (add sources), `cpp/src/bindings.cpp`
 - Test: `tests/test_whalecore_mc.py`
 
 **Interfaces:**
+
 - Produces (C++): `whalecore::SkillResult{edge, p_value, null_mean, null_sd, n_eff}`; `skill_mc(span<const double> prices, span<const uint8_t> outcomes, span<const double> weights, uint32_t n_sims, uint64_t seed)`; `skill_mc_batch(prices, outcomes, weights, span<const int64_t> offsets, n_sims, seed, unsigned n_threads) -> vector<SkillResult>`.
 - Produces (Python): `whalecore.skill_mc(prices: f64[n], outcomes: u8[n], weights: f64[n], n_sims=100000, seed=42) -> SkillResult`; `whalecore.skill_mc_batch(prices, outcomes, weights, offsets: i64[m+1], n_sims=100000, seed=42, n_threads=0) -> list[SkillResult]`; invalid input raises `ValueError`.
 
 - [ ] **Step 1: Write the failing C++ tests**
 
 `cpp/tests/test_montecarlo.cpp`:
+
 ```cpp
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -924,6 +952,7 @@ Expected: FAIL — `whalecore/montecarlo.hpp: No such file or directory`.
 - [ ] **Step 3: Implement**
 
 `cpp/include/whalecore/montecarlo.hpp`:
+
 ```cpp
 #pragma once
 
@@ -960,6 +989,7 @@ std::vector<SkillResult> skill_mc_batch(std::span<const double> prices,
 ```
 
 `cpp/src/montecarlo.cpp`:
+
 ```cpp
 #include "whalecore/montecarlo.hpp"
 
@@ -1081,6 +1111,7 @@ std::vector<SkillResult> skill_mc_batch(std::span<const double> prices,
 ```
 
 In `CMakeLists.txt`, change the library sources to:
+
 ```cmake
 add_library(whalecore_lib STATIC
   cpp/src/version.cpp
@@ -1096,6 +1127,7 @@ Expected: all test cases pass (the calibration case takes ~1 s).
 - [ ] **Step 5: Write the failing Python binding test**
 
 `tests/test_whalecore_mc.py`:
+
 ```python
 import numpy as np
 import pytest
@@ -1134,6 +1166,7 @@ def test_invalid_input_raises_value_error():
 - [ ] **Step 6: Add the bindings**
 
 Replace `cpp/src/bindings.cpp` with:
+
 ```cpp
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -1219,16 +1252,19 @@ git commit -m "feat(whalecore): multithreaded Monte Carlo skill significance eng
 ### Task 4: C++ order book engine
 
 **Files:**
+
 - Create: `cpp/include/whalecore/orderbook.hpp`, `cpp/src/orderbook.cpp`, `cpp/tests/test_orderbook.cpp`
 - Modify: `CMakeLists.txt`, `cpp/src/bindings.cpp`
 - Test: `tests/test_whalecore_book.py`
 
 **Interfaces:**
+
 - Produces (Python): `whalecore.Side.BID | ASK`; `whalecore.OrderBook()` with `apply_snapshot(bids: f64[n,2], asks: f64[n,2])`, `apply_delta(side, price, size)`, `clear()`, `best_bid() / best_ask() / mid() / spread() / microprice() -> float | None`, `depth(side, ticks_from_best: int) -> float`, `walk(side, notional_usdc) -> WalkResult{vwap, filled_usdc, filled_shares, levels_consumed, worst_price, complete}`, `imbalance(levels: int) -> float`, `crossed() -> bool`, `level_count(side) -> int`. `walk(Side.ASK, x)` = buying x USDC; `walk(Side.BID, x)` = selling x USDC. Invalid input raises `ValueError`.
 
 - [ ] **Step 1: Write the failing C++ tests**
 
 `cpp/tests/test_orderbook.cpp`:
+
 ```cpp
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -1363,6 +1399,7 @@ Run: `scripts/test-cpp.sh` — Expected: FAIL, `whalecore/orderbook.hpp` not fou
 - [ ] **Step 3: Implement**
 
 `cpp/include/whalecore/orderbook.hpp`:
+
 ```cpp
 #pragma once
 
@@ -1424,6 +1461,7 @@ private:
 ```
 
 `cpp/src/orderbook.cpp`:
+
 ```cpp
 #include "whalecore/orderbook.hpp"
 
@@ -1586,6 +1624,7 @@ Run: `scripts/test-cpp.sh` — Expected: all pass.
 - [ ] **Step 5: Write the failing Python test**
 
 `tests/test_whalecore_book.py`:
+
 ```python
 import math
 
@@ -1625,18 +1664,23 @@ def test_bad_price_raises_value_error():
 - [ ] **Step 6: Add the bindings**
 
 In `cpp/src/bindings.cpp` add includes:
+
 ```cpp
 #include <nanobind/stl/optional.h>
 
 #include "whalecore/orderbook.hpp"
 ```
+
 add after the `Vec` alias:
+
 ```cpp
 using Levels = nb::ndarray<const double, nb::shape<-1, 2>, nb::c_contig, nb::device::cpu>;
 
 static std::span<const double> flat(const Levels& a) { return {a.data(), a.shape(0) * 2}; }
 ```
+
 and append inside `NB_MODULE` (after `skill_mc_batch`):
+
 ```cpp
     using whalecore::OrderBook;
     using whalecore::Side;
@@ -1683,19 +1727,23 @@ git commit -m "feat(whalecore): L2 order book with microprice, depth and book wa
 ```
 
 ---
+
 ### Task 5: Domain models and boundary parsers
 
 **Files:**
+
 - Create: `src/whalescan/models.py`, `src/whalescan/parsers.py`
 - Test: `tests/test_parsers.py`
 
 **Interfaces:**
+
 - Consumes: `tests/fixtures/real/*.json` (Task 2).
 - Produces: frozen dataclasses `Trade, ClosedPosition, Market, LeaderboardEntry, BookSnapshot, PricePoint` (fields below); `resolved_winner(closed: bool, outcome_prices: Sequence[float]) -> int | None`; `Market.winner_index() -> int | None`; `Market.fee_per_share(price: float) -> float`; `Trade.usdc -> float`; parsers `parse_trade, parse_closed_position, parse_market, parse_leaderboard, parse_book, parse_price_history`; `parse_many(rows, fn) -> tuple[list, int]` (items, n_skipped); `ParseError(ValueError)` with `.payload`; `iso_to_ts(s: str | None) -> int | None`.
 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_parsers.py`:
+
 ```python
 import json
 from datetime import UTC, datetime
@@ -1855,6 +1903,7 @@ Run: `uv run pytest tests/test_parsers.py -q` — Expected: FAIL, `ModuleNotFoun
 - [ ] **Step 3: Implement**
 
 `src/whalescan/models.py`:
+
 ```python
 """Domain objects. Everything downstream of the API boundary uses these, never raw JSON."""
 
@@ -1967,6 +2016,7 @@ class PricePoint:
 ```
 
 `src/whalescan/parsers.py`:
+
 ```python
 """The only place raw API JSON is touched. Anything malformed becomes a ParseError carrying the payload."""
 
@@ -2146,15 +2196,18 @@ git commit -m "feat: domain models and boundary parsers with real-payload tests"
 ### Task 6: Async HTTP client with rate limiting, retries and block detection
 
 **Files:**
+
 - Create: `src/whalescan/api/__init__.py` (empty), `src/whalescan/api/http.py`
 - Test: `tests/test_http.py`
 
 **Interfaces:**
+
 - Produces: `ApiError(RuntimeError)` with `.status: int | None` and `.body: str`; `BlockedError(ApiError)`; `TokenBucket(rate_per_s, burst=1, clock=time.monotonic, sleep=asyncio.sleep)` with `async acquire()`; `HttpClient(*, user_agent, rate_per_s, max_retries, transport=None, sleep=asyncio.sleep, backoff_s=0.5, timeout_s=30.0)` with `async get_json(url: str, params: Sequence[tuple[str, str | int | float]] = ()) -> Any`, `async aclose()`, and counter attribute `errors: int`; `Params` type alias.
 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_http.py`:
+
 ```python
 import httpx
 import pytest
@@ -2280,6 +2333,7 @@ Run: `uv run pytest tests/test_http.py -q` — Expected: FAIL, module not found.
 Create empty `src/whalescan/api/__init__.py`.
 
 `src/whalescan/api/http.py`:
+
 ```python
 """Polite async HTTP: token-bucket rate limit, exponential backoff, and loud failure on bot-protection blocks."""
 
@@ -2414,10 +2468,12 @@ git commit -m "feat(api): async HTTP client with token bucket, backoff and Cloud
 ### Task 7: Polymarket API clients (Data API, Gamma, CLOB)
 
 **Files:**
+
 - Create: `src/whalescan/api/data_api.py`, `src/whalescan/api/gamma.py`, `src/whalescan/api/clob.py`
 - Test: `tests/test_apis.py`
 
 **Interfaces:**
+
 - Consumes: `HttpClient.get_json`, `ApiError` (Task 6); parsers (Task 5).
 - Produces:
   - `DataApi(http)`: `async closed_positions(wallet: str, *, since_ts: int | None = None) -> PositionHistory`; `async trades(*, user: str | None = None, min_usdc: float | None = None, since_ts: int | None = None) -> TradePage`; `async leaderboard(*, period: str, order_by: str, pages: int) -> list[LeaderboardEntry]`. Dataclasses `PositionHistory(positions: list[ClosedPosition], complete: bool)`, `TradePage(trades: list[Trade], complete: bool)`. Module constants `CLOSED_PAGE = 50`, `TRADES_PAGE = 500`, `LEADERBOARD_PAGE = 50`, `MAX_OFFSET = 10_000`.
@@ -2428,6 +2484,7 @@ git commit -m "feat(api): async HTTP client with token bucket, backoff and Cloud
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_apis.py`:
+
 ```python
 import httpx
 
@@ -2577,6 +2634,7 @@ Run: `uv run pytest tests/test_apis.py -q` — Expected: FAIL, module not found.
 - [ ] **Step 3: Implement**
 
 `src/whalescan/api/data_api.py`:
+
 ```python
 """Polymarket Data API: trades, closed positions, leaderboard. See docs/polymarket-api-notes.md."""
 
@@ -2699,6 +2757,7 @@ class DataApi:
 ```
 
 `src/whalescan/api/gamma.py`:
+
 ```python
 """Gamma API: market metadata (resolution, fees, tags)."""
 
@@ -2736,6 +2795,7 @@ class GammaApi:
 ```
 
 `src/whalescan/api/clob.py`:
+
 ```python
 """CLOB REST: order book snapshots and price history."""
 
@@ -2769,6 +2829,7 @@ Run: `uv run pytest tests/test_apis.py -q` — Expected: all pass.
 - [ ] **Step 5: Live sanity check (network)**
 
 Run:
+
 ```bash
 uv run python -c "
 import asyncio
@@ -2782,6 +2843,7 @@ async def main():
     await h.aclose()
 asyncio.run(main())"
 ```
+
 Expected: a few hundred positions, `complete`, and `wins` strictly between 0 and the total.
 
 - [ ] **Step 6: Commit**
@@ -2796,10 +2858,12 @@ git commit -m "feat(api): Data API, Gamma and CLOB clients with bias-safe pagina
 ### Task 8: DuckDB store with process lock
 
 **Files:**
+
 - Create: `src/whalescan/store.py`
 - Test: `tests/test_store.py`
 
 **Interfaces:**
+
 - Consumes: models (Task 5).
 - Produces: `LockedError(RuntimeError)`; `ProcessLock(path: Path)` with `acquire()`/`release()`; `WalletState(fetched_at: int, complete: bool, max_ts: int | None, name: str)`; `Store(db_path: Path, *, lock: bool = True)` (context manager) with:
   `upsert_trades(trades) -> int`, `upsert_positions(positions) -> int`, `upsert_markets(markets, now: int) -> int`,
@@ -2814,10 +2878,8 @@ git commit -m "feat(api): Data API, Gamma and CLOB clients with bias-safe pagina
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_store.py`:
-```python
-import subprocess
-import sys
 
+```python
 import pandas as pd
 import pytest
 
@@ -2919,25 +2981,6 @@ def test_second_writer_gets_a_clear_lock_error(tmp_path):
     with Store(tmp_path / "db.duckdb"):
         with pytest.raises(LockedError, match="another whalescan process"):
             Store(tmp_path / "db.duckdb")
-
-
-def test_lock_is_released_when_holder_is_sigkilled(tmp_path):
-    # flock locks belong to the process, not the file: a SIGKILL'd holder leaves db.lock on disk
-    # but the OS releases the lock, so the next run must start normally.
-    lock_path = tmp_path / "db.lock"
-    code = (f"import time; from pathlib import Path; from whalescan.store import ProcessLock; "
-            f"ProcessLock(Path({str(lock_path)!r})).acquire(); print('held', flush=True); time.sleep(60)")
-    holder = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
-    try:
-        assert holder.stdout.readline().strip() == "held"
-        with pytest.raises(LockedError):
-            Store(tmp_path / "db.duckdb")
-    finally:
-        holder.kill()
-        holder.wait()
-    assert lock_path.exists()
-    with Store(tmp_path / "db.duckdb"):
-        pass
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -2947,6 +2990,7 @@ Run: `uv run pytest tests/test_store.py -q` — Expected: FAIL, module not found
 - [ ] **Step 3: Implement**
 
 `src/whalescan/store.py`:
+
 ```python
 """DuckDB persistence. One writer process per file, enforced with an advisory lock file."""
 
@@ -3213,19 +3257,23 @@ git commit -m "feat: DuckDB store with idempotent upserts and single-writer lock
 ```
 
 ---
+
 ### Task 9: Classification — categories, blocklist, wallet flags
 
 **Files:**
+
 - Create: `src/whalescan/classify.py`
 - Test: `tests/test_classify.py`
 
 **Interfaces:**
+
 - Consumes: `CategoriesCfg`, `BlocklistCfg`, `ScoringCfg` (Task 1).
 - Produces: `category_for_tags(tags: Iterable[str], cfg: CategoriesCfg) -> str` (one of `cfg.order` or `"OTHER"`); `Blocklist(cfg: BlocklistCfg)` with `blocked(*, event_slug: str, slug: str = "", volume: float | None = None) -> bool`; `wallet_flags(positions: pd.DataFrame, cfg: ScoringCfg) -> pd.Series` (index wallet → comma-joined subset of `MARKET_MAKER,FARMER,LOTTERY`, `""` when clean; input columns `wallet, condition_id, outcome_index, avg_price, total_bought`).
 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_classify.py`:
+
 ```python
 import pandas as pd
 
@@ -3284,6 +3332,7 @@ Run: `uv run pytest tests/test_classify.py -q` — Expected: FAIL, module not fo
 - [ ] **Step 3: Implement**
 
 `src/whalescan/classify.py`:
+
 ```python
 """Market categories, market blocklist, and behavioural wallet flags (spec §4.4)."""
 
@@ -3357,16 +3406,19 @@ git commit -m "feat: category mapping, market blocklist and wallet behaviour fla
 ### Task 10: Scoring — eligibility, Monte Carlo, shrinkage, BH certification
 
 **Files:**
+
 - Create: `src/whalescan/scoring.py`
 - Test: `tests/test_scoring.py`
 
 **Interfaces:**
+
 - Consumes: `whalecore.skill_mc_batch` (Task 3); `Blocklist`, `category_for_tags` (Task 9); `Store.positions_frame()` column set (Task 8).
 - Produces: `ELIGIBLE_COLUMNS = ["wallet", "condition_id", "asset", "category", "p", "y", "w", "stake", "closed_ts", "title", "outcome"]`; `SCORE_COLUMNS` (identical to `store.SCORE_COLS`); `prepare_positions(frame, scoring: ScoringCfg, categories: CategoriesCfg, blocklist: Blocklist) -> pd.DataFrame[ELIGIBLE_COLUMNS]`; `benjamini_hochberg(p_values: np.ndarray, q: float) -> np.ndarray[bool]`; `score_wallets(eligible, flags: pd.Series, scoring: ScoringCfg, *, as_of: int, n_sims: int | None = None) -> pd.DataFrame[SCORE_COLUMNS]` — one row per (wallet, category) plus (wallet, "ALL").
 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_scoring.py`:
+
 ```python
 from dataclasses import replace
 
@@ -3502,6 +3554,7 @@ Run: `uv run pytest tests/test_scoring.py -q` — Expected: FAIL, module not fou
 - [ ] **Step 3: Implement**
 
 `src/whalescan/scoring.py`:
+
 ```python
 """Wallet skill scoring (spec §4.5): C++ Monte Carlo p-values, empirical-Bayes shrinkage, BH certification."""
 
@@ -3652,10 +3705,12 @@ git commit -m "feat: wallet scoring with two-pass Monte Carlo, shrinkage and BH 
 ### Task 11: Follow quotes and the signal gate
 
 **Files:**
+
 - Create: `src/whalescan/book.py`, `src/whalescan/gate.py`
 - Test: `tests/test_book.py`, `tests/test_gate.py`
 
 **Interfaces:**
+
 - Consumes: `whalecore.OrderBook`, `whalecore.Side` (Task 4); `BookSnapshot`, `Market`, `Trade` (Task 5); `Blocklist`, `category_for_tags` (Task 9); `SCORE_COLUMNS` frame (Task 10).
 - Produces:
   - `book.py`: `FollowQuote(vwap: float, complete: bool, book_as_of: int, best_bid: float | None, best_ask: float | None, microprice: float | None, levels: tuple[tuple[float, float], ...])`; `follow_quote(snap: BookSnapshot, size_usdc: float) -> FollowQuote` (levels = best 10 asks ascending).
@@ -3664,6 +3719,7 @@ git commit -m "feat: wallet scoring with two-pass Monte Carlo, shrinkage and BH 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_book.py`:
+
 ```python
 import math
 
@@ -3686,6 +3742,7 @@ def test_follow_quote_on_empty_book():
 ```
 
 `tests/test_gate.py`:
+
 ```python
 from dataclasses import replace
 
@@ -3866,6 +3923,7 @@ Run: `uv run pytest tests/test_book.py tests/test_gate.py -q` — Expected: FAIL
 - [ ] **Step 3: Implement**
 
 `src/whalescan/book.py`:
+
 ```python
 """Cost-to-follow from an order book snapshot, computed by the C++ book engine."""
 
@@ -3911,6 +3969,7 @@ def follow_quote(snap: BookSnapshot, size_usdc: float) -> FollowQuote:
 ```
 
 `src/whalescan/gate.py`:
+
 ```python
 """Signal gate (spec §4.6): merge fills into position events, then apply checks G1–G7."""
 
@@ -4166,16 +4225,19 @@ git commit -m "feat: follow quotes via C++ book and the G1–G7 signal gate"
 ### Task 12: Walk-forward validation
 
 **Files:**
+
 - Create: `src/whalescan/validate.py`
 - Test: `tests/test_validate.py`
 
 **Interfaces:**
+
 - Consumes: `score_wallets`, `ELIGIBLE_COLUMNS` (Task 10); `aggregate`, `evaluate`, `GateContext`, `ScoreBook` (Task 11); `FollowQuote` (Task 11).
 - Produces: `Fold(cutoff: int, end: int)`; `make_folds(first_ts, last_ts, *, fold_days, min_history_days) -> list[Fold]`; `run_validation(eligible, flags, trades: list[Trade], markets: Mapping[str, Market], cfg: Config, blocklist: Blocklist, *, now: int) -> dict` with keys `generated_at, verdict, folds, groups, calibration, params, caveats`; `groups` has keys `A, B, SIGNALS, BASELINE`, each `{n, mean_ret, hit_rate, t_stat}`; `verdict ∈ {"INSUFFICIENT DATA", "EDGE CONFIRMED", "EDGE NOT CONFIRMED"}`.
 
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_validate.py`:
+
 ```python
 from dataclasses import replace
 
@@ -4256,6 +4318,7 @@ Run: `uv run pytest tests/test_validate.py -q` — Expected: FAIL, module not fo
 - [ ] **Step 3: Implement**
 
 `src/whalescan/validate.py`:
+
 ```python
 """Walk-forward validation (spec §4.7): score on the past, test on the future, report honestly."""
 
@@ -4396,13 +4459,16 @@ git commit -m "feat: walk-forward validation with tier, baseline and calibration
 ```
 
 ---
+
 ### Task 13: Snapshot writer, batch pipeline and CLI
 
 **Files:**
+
 - Create: `src/whalescan/snapshot.py`, `src/whalescan/batch.py`, `src/whalescan/cli.py`
 - Test: `tests/test_batch.py`
 
 **Interfaces:**
+
 - Consumes: everything above. API client method names/signatures from Task 7 (the fakes in the test mirror them exactly).
 - Produces:
   - `snapshot.py`: `clean(obj) -> JSON-safe obj` (NaN/inf → None, numpy → Python, dataclass → dict); `write_json_atomic(path: Path, obj) -> None`; `write_parquet_atomic(df, path: Path) -> None`; `evaluation_json(e: Evaluation, market: Market | None, names: Mapping[str, str], history: list[PricePoint] | None) -> dict`; `whales_json(scores, eligible, names, *, recent_n=12, watchlist_n=25) -> list[dict]`.
@@ -4413,6 +4479,7 @@ git commit -m "feat: walk-forward validation with tier, baseline and calibration
 - [ ] **Step 1: Write the failing tests**
 
 `tests/test_batch.py`:
+
 ```python
 import json
 from dataclasses import replace
@@ -4612,6 +4679,7 @@ Run: `uv run pytest tests/test_batch.py -q` — Expected: FAIL, modules not foun
 - [ ] **Step 3: Implement the snapshot writer**
 
 `src/whalescan/snapshot.py`:
+
 ```python
 """Strict-JSON snapshot files read by the dashboard. Writes are atomic (tmp file + rename)."""
 
@@ -4736,6 +4804,7 @@ def whales_json(scores: pd.DataFrame, eligible: pd.DataFrame, names: Mapping[str
 - [ ] **Step 4: Implement the batch pipeline**
 
 `src/whalescan/batch.py`:
+
 ```python
 """Snapshot pipeline (spec §3): universe → positions → markets → scores → signals → validation → JSON."""
 
@@ -5018,6 +5087,7 @@ async def run_batch(cfg: Config, *, apis: Apis | None = None, now: int | None = 
 - [ ] **Step 5: Implement the CLI**
 
 `src/whalescan/cli.py`:
+
 ```python
 """Command line entry point: `whalescan score` and `whalescan batch`."""
 
@@ -5117,18 +5187,21 @@ git commit -m "feat: batch snapshot pipeline, strict JSON writer and whalescan C
 ### Task 14: Dashboard (snapshot mode)
 
 **Files:**
+
 - Create: `web/package.json`, `web/tsconfig.json`, `web/vite.config.ts`, `web/index.html`, `web/scripts/copy-data.mjs`
 - Create: `web/src/main.tsx`, `web/src/App.tsx`, `web/src/styles.css`, `web/src/types.ts`, `web/src/format.ts`, `web/src/data.ts`
 - Create: `web/src/components/{Panel,StatusBar,SignalsPanel,ContactsPanel,DossierPanel,BookPanel,PriceChart,ValidationPanel}.tsx`
 - Test: `web/src/format.test.ts`, `web/src/data.test.ts`
 
 **Interfaces:**
+
 - Consumes: snapshot JSON (Task 13) from `./data/*.json` relative to the page.
 - Produces: `npm run build` → static `web/dist/` with `web/dist/data/*.json` copied in.
 
 - [ ] **Step 1: Create the project skeleton and install dependencies**
 
 `web/package.json`:
+
 ```json
 {
   "name": "whalescan-web",
@@ -5147,15 +5220,18 @@ git commit -m "feat: batch snapshot pipeline, strict JSON writer and whalescan C
 ```
 
 Run:
+
 ```bash
 cd web
 npm install react react-dom lightweight-charts @fontsource/ibm-plex-mono
 npm install -D vite @vitejs/plugin-react typescript @types/react @types/react-dom vitest @types/node
 cd ..
 ```
+
 Expected: `package.json` gains `dependencies`/`devDependencies`; `package-lock.json` is created. Confirm `lightweight-charts` major version is 5 (`npm ls lightweight-charts`); the chart code below uses the v5 API (`addSeries(LineSeries)`, `createSeriesMarkers`).
 
 `web/tsconfig.json`:
+
 ```json
 {
   "compilerOptions": {
@@ -5178,6 +5254,7 @@ Expected: `package.json` gains `dependencies`/`devDependencies`; `package-lock.j
 ```
 
 `web/vite.config.ts`:
+
 ```ts
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react';
@@ -5188,6 +5265,7 @@ export default defineConfig({ base: './', plugins: [react()], test: { environmen
 ```
 
 `web/index.html`:
+
 ```html
 <!doctype html>
 <html lang="en">
@@ -5205,6 +5283,7 @@ export default defineConfig({ base: './', plugins: [react()], test: { environmen
 ```
 
 `web/scripts/copy-data.mjs`:
+
 ```js
 // Copies ../data/snapshot into public/data so both `vite dev` and `vite build` serve it at ./data/.
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -5224,6 +5303,7 @@ if (existsSync(src)) {
 - [ ] **Step 2: Write the types (mirror of Task 13 JSON)**
 
 `web/src/types.ts`:
+
 ```ts
 export type Status = 'SIGNAL' | 'REJECTED' | 'EXIT' | 'CONFLICT' | 'EXPIRED';
 
@@ -5322,6 +5402,7 @@ export interface Snapshot { meta: Meta; signals: Signal[]; contacts: Signal[]; w
 - [ ] **Step 3: Write the failing tests**
 
 `web/src/format.test.ts`:
+
 ```ts
 import { describe, expect, it } from 'vitest';
 import { fmtAge, fmtCents, fmtP, fmtPrice, fmtUsd, shortWallet, signalsEmptyMessage } from './format';
@@ -5366,6 +5447,7 @@ describe('format', () => {
 ```
 
 `web/src/data.test.ts`:
+
 ```ts
 import { describe, expect, it } from 'vitest';
 import { loadSnapshot } from './data';
@@ -5406,6 +5488,7 @@ Run: `cd web && npm test; cd ..` — Expected: FAIL, cannot resolve `./format` a
 - [ ] **Step 5: Implement formatting and data loading**
 
 `web/src/format.ts`:
+
 ```ts
 import type { Meta } from './types';
 
@@ -5448,6 +5531,7 @@ export function signalsEmptyMessage(meta: Meta): string {
 ```
 
 `web/src/data.ts`:
+
 ```ts
 import type { Meta, Signal, Snapshot, Validation, Whale } from './types';
 
@@ -5478,6 +5562,7 @@ Run: `cd web && npm test; cd ..` — Expected: 7 tests pass.
 - [ ] **Step 7: Implement the styles**
 
 `web/src/styles.css`:
+
 ```css
 :root {
   --bg: #07090b;
@@ -5613,6 +5698,7 @@ td.num, th.num { text-align: right; }
 - [ ] **Step 8: Implement the components**
 
 `web/src/components/Panel.tsx`:
+
 ```tsx
 import type { ReactNode } from 'react';
 
@@ -5633,6 +5719,7 @@ export function Panel({ code, title, right, className = '', children }: Props) {
 ```
 
 `web/src/components/StatusBar.tsx`:
+
 ```tsx
 import { fmtAge, fmtUtc } from '../format';
 import type { Meta } from '../types';
@@ -5659,6 +5746,7 @@ export function StatusBar({ meta, now }: { meta: Meta; now: number }) {
 ```
 
 `web/src/components/SignalsPanel.tsx`:
+
 ```tsx
 import type { RefObject } from 'react';
 import { fmtAge, fmtCents, fmtPrice, fmtUsd, signalsEmptyMessage } from '../format';
@@ -5728,6 +5816,7 @@ function SignalCard({ s, selected, onSelect, now }: { s: Signal; selected: boole
 ```
 
 `web/src/components/ContactsPanel.tsx`:
+
 ```tsx
 import { fmtAge, fmtPrice, fmtUsd, shortWallet } from '../format';
 import type { Signal } from '../types';
@@ -5770,6 +5859,7 @@ export function ContactsPanel({ contacts, now, onWallet }: { contacts: Signal[];
 ```
 
 `web/src/components/DossierPanel.tsx`:
+
 ```tsx
 import { fmtCents, fmtDate, fmtP, fmtPrice, fmtUsd, shortWallet } from '../format';
 import type { Whale } from '../types';
@@ -5834,6 +5924,7 @@ export function DossierPanel({ whale, wallet }: { whale: Whale | null; wallet: s
 ```
 
 `web/src/components/PriceChart.tsx`:
+
 ```tsx
 import { ColorType, LineSeries, LineStyle, createChart, createSeriesMarkers, type UTCTimestamp } from 'lightweight-charts';
 import { useEffect, useMemo, useRef } from 'react';
@@ -5883,6 +5974,7 @@ export function PriceChart({ history, entryTs, entryPrice, maxEntry }: Props) {
 ```
 
 `web/src/components/BookPanel.tsx`:
+
 ```tsx
 import { useMemo } from 'react';
 import { fmtAge, fmtPrice, fmtUsd } from '../format';
@@ -5942,6 +6034,7 @@ export function BookPanel({ signal, now, followSize }: { signal: Signal | null; 
 ```
 
 `web/src/components/ValidationPanel.tsx`:
+
 ```tsx
 import { fmtCents, fmtDate, fmtPct } from '../format';
 import type { Validation } from '../types';
@@ -6004,6 +6097,7 @@ export function ValidationPanel({ validation }: { validation: Validation | null 
 - [ ] **Step 9: Implement the app shell**
 
 `web/src/App.tsx`:
+
 ```tsx
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookPanel } from './components/BookPanel';
@@ -6077,6 +6171,7 @@ export default function App() {
 ```
 
 `web/src/main.tsx`:
+
 ```tsx
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
@@ -6115,15 +6210,18 @@ git commit -m "feat(web): military-style snapshot dashboard with signals, book, 
 ### Task 15: CI, scheduled snapshot + GitHub Pages, README
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`, `.github/workflows/snapshot.yml`, `README.md`
 
 **Interfaces:**
+
 - Consumes: `scripts/test-cpp.sh`, `uv run pytest`, `uv run whalescan batch`, `web` npm scripts.
 - Produces: green CI on every push; a public dashboard at `https://<user>.github.io/whalescan/` refreshed every 6 hours.
 
 - [ ] **Step 1: Write the CI workflow**
 
 `.github/workflows/ci.yml`:
+
 ```yaml
 name: ci
 on:
@@ -6157,6 +6255,7 @@ jobs:
 - [ ] **Step 2: Write the snapshot + Pages workflow**
 
 `.github/workflows/snapshot.yml`:
+
 ```yaml
 name: snapshot
 on:
@@ -6231,6 +6330,7 @@ jobs:
 - [ ] **Step 3: Write the README**
 
 `README.md`:
+
 ````markdown
 # WHALESCAN
 
@@ -6313,22 +6413,11 @@ gh workflow run snapshot
 gh run watch "$(gh run list --workflow snapshot -L1 --json databaseId -q '.[0].databaseId')"
 gh api "repos/{owner}/whalescan/pages" -q .html_url
 ```
+
 Expected: the `ci` run is green; the `snapshot` run completes (the first full run can take a few hours while the position cache fills); the printed Pages URL serves the dashboard. If the run fails with `BLOCKED`, run `uv run whalescan batch --publish` locally and then `gh workflow run snapshot -f skip_batch=true`.
 
 ---
 
 ## After this plan
-
-Design decisions already made for Plan 2 (measured 2026-09-24 on the 200 most active tokens: ~1,100 WS
-messages/s carrying ~2,200 book deltas/s; Python `json.loads` ≈ 3.3 µs per message, i.e. < 0.5% of one core):
-- **Transport stays in Python** (`websockets` + asyncio). A C++ WebSocket client would add TLS, reconnect and
-  build complexity to save a cost that is already negligible, and gating needs Python anyway.
-- **Batch the C++ boundary:** one `apply_deltas(side[], price[], size[])` call per WS message instead of one call
-  per delta.
-- **Book storage:** replace `std::map` with a fixed array indexed by tick (prices live in [0, 1], so at most
-  10,001 slots per side) plus cached best-bid/best-ask indices — O(1) updates, no allocation, no Abseil
-  dependency. Only if profiling shows the book mattering; the `OrderBook` interface stays identical.
-- **Off-grid prices:** `apply_delta` rejects a price that is not within 1e-9 of the 0.0001 grid (every
-  Polymarket tick size, 0.1 down to 0.0001, is a multiple of it), and the stream layer resnapshots that token.
 
 Write **Plan 2 — Live Station** against the code as it now exists: reconnecting WebSocket client (`stream/ws_base.py`), RTDS ingest, CLOB market WebSocket watch set feeding `whalecore.OrderBook` deltas with crossed-book resync, FastAPI + WebSocket push to the dashboard (`data.ts` gains live mode), STALE re-evaluation, `data/live.duckdb` + `scores.parquet` reload, and the end-of-project "under the hood" walkthrough.
