@@ -104,11 +104,15 @@ async def refresh_positions(apis: Apis, store: Store, wallets: Mapping[str, str]
         since = prev.max_ts if prev and prev.complete and prev.max_ts is not None else None
         async with sem:
             hist = await _guarded(apis.data.closed_positions(wallet, since_ts=since), f"positions {wallet}")
-        if hist is None:
+            open_hist = await _guarded(apis.data.redeemable_positions(wallet), f"redeemable {wallet}")
+        if hist is None or open_hist is None:
             failures += 1
             return
+        # Unredeemed resolved positions first, then sold/redeemed ones, so a closed record wins a key clash.
+        store.upsert_positions(open_hist.positions)
         store.upsert_positions(hist.positions)
-        store.record_wallet_fetch(wallet, fetched_at=now, complete=hist.complete, source=source)
+        store.record_wallet_fetch(wallet, fetched_at=now, complete=hist.complete and open_hist.complete,
+                                  source=source)
         done += 1
         if done % step == 0 or done == len(wallets):
             log.info("positions: %d/%d wallets", done, len(wallets))

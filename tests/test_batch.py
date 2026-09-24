@@ -24,8 +24,12 @@ def config(tmp):
 
 
 class FakeData:
-    def __init__(self, positions, trades, *, block=False):
+    def __init__(self, positions, trades, *, block=False, redeemable=None):
         self.positions, self.rows, self.block, self.skipped = positions, trades, block, 0
+        self.redeemable = redeemable or {}
+
+    async def redeemable_positions(self, wallet):
+        return PositionHistory(self.redeemable.get(wallet, []), True)
 
     async def leaderboard(self, *, period, order_by, pages):
         if self.block:
@@ -90,9 +94,9 @@ def world(skilled=True, seed=5):
     return positions, markets, trades
 
 
-async def run(tmp, w, block=False, **kw):
+async def run(tmp, w, block=False, redeemable=None, **kw):
     positions, markets, trades = w
-    apis = Apis(FakeData(positions, trades, block=block), FakeGamma(markets), FakeClob())
+    apis = Apis(FakeData(positions, trades, block=block, redeemable=redeemable), FakeGamma(markets), FakeClob())
     return await run_batch(config(tmp), apis=apis, now=NOW, **kw)
 
 
@@ -212,3 +216,20 @@ async def test_long_phases_log_progress(tmp_path, caplog):
     text = caplog.text
     assert "positions: 31/31 wallets" in text
     assert "universe: 31 wallets" in text
+
+
+async def test_unredeemed_losers_are_scored_so_winner_only_histories_do_not_certify(tmp_path):
+    positions, markets, trades = world()
+    wins, losses = [], []
+    for i in range(120):
+        cid = f"0xfaker-c{i}"
+        won = i % 2 == 0
+        markets[cid] = resolved(cid, 0 if won else 1)
+        row = ClosedPosition("0xfaker", f"{cid}-y", cid, 0.5, 2000.0, 1000.0 if won else 0.0, 1.0 if won else 0.0,
+                             "Yes", 0, f"F{i}", f"ev-{cid}", NOW - 20 * DAY + i if won else 0)
+        (wins if won else losses).append(row)
+    positions["0xfaker"] = wins  # /closed-positions: only the redeemed winners
+    report = await run(tmp_path, (positions, markets, trades), redeemable={"0xfaker": losses}, skip_validation=True)
+    assert report.certified_wallets == 1  # the genuinely skilled whale only
+    scores = {w["wallet"]: w for w in read(tmp_path, "whales.json")}
+    assert "0xfaker" not in scores or not scores["0xfaker"]["certified"]

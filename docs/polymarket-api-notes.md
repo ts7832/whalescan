@@ -12,6 +12,10 @@ Python's default (`Python-urllib/x`) gets `403 text/plain` from `server: cloudfl
   **Default sort is realizedPnl DESC** — page 1 of a top wallet is 100% winners. Always sort by TIMESTAMP.
   Row: proxyWallet, asset, conditionId, avgPrice, totalBought, realizedPnl, curPrice, title, slug,
   eventSlug, outcome, outcomeIndex, oppositeOutcome, oppositeAsset, endDate, timestamp.
+- `GET /positions?user&sizeThreshold=0&limit(max 500)&offset` — current positions. **Resolved losers usually stay
+  here forever** (`redeemable: true`, `curPrice: 0`): redeeming a loser pays $0, so nobody does, and they never reach
+  `/closed-positions`. Verified 2026-09-24: a top wallet showed a 97% win rate in `/closed-positions` and had
+  287 unredeemed losers ($6.2M staked) here. Scoring must union both endpoints. Rows have no close timestamp.
 - `GET /v1/leaderboard?timePeriod=(DAY|WEEK|MONTH|ALL)&orderBy=(PNL|VOL)&limit(max 50)&offset`
   deep pagination works (offset 2000 OK). Row: rank(str), proxyWallet, userName, vol, pnl.
 

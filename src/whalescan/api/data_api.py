@@ -8,13 +8,14 @@ from typing import Any
 
 from whalescan.api.http import ApiError, HttpClient, Params
 from whalescan.models import ClosedPosition, LeaderboardEntry, Trade
-from whalescan.parsers import parse_closed_position, parse_leaderboard, parse_many, parse_trade
+from whalescan.parsers import parse_closed_position, parse_leaderboard, parse_many, parse_open_position, parse_trade
 
 log = logging.getLogger(__name__)
 
 DATA_API = "https://data-api.polymarket.com"
 CLOSED_PAGE = 50
 TRADES_PAGE = 500
+OPEN_PAGE = 500
 LEADERBOARD_PAGE = 50
 MAX_OFFSET = 10_000
 
@@ -82,6 +83,28 @@ class DataApi:
             if len(rows) < CLOSED_PAGE:
                 return PositionHistory(out, True)
             offset += CLOSED_PAGE
+        return PositionHistory(out, True, truncated=True)
+
+    async def redeemable_positions(self, wallet: str) -> PositionHistory:
+        """Resolved positions still sitting in /positions (redeemable=true).
+
+        /closed-positions only lists positions that were sold or redeemed. Losing positions pay $0,
+        so traders rarely redeem them: without this call a history is overwhelmingly winners
+        (verified: a top wallet showed 97% wins in /closed-positions and 287 unredeemed losers here).
+        """
+        out: list[ClosedPosition] = []
+        offset = 0
+        while offset <= MAX_OFFSET:
+            rows = await self._page("/positions", [("user", wallet), ("sizeThreshold", 0), ("limit", OPEN_PAGE),
+                                                   ("offset", offset)])
+            if rows is None:
+                return PositionHistory(out, offset > 0, truncated=offset > 0)
+            batch, skipped = parse_many([r for r in rows if r.get("redeemable")], parse_open_position)
+            self.skipped += skipped
+            out.extend(batch)
+            if len(rows) < OPEN_PAGE:
+                return PositionHistory(out, True)
+            offset += OPEN_PAGE
         return PositionHistory(out, True, truncated=True)
 
     async def trades(self, *, user: str | None = None, min_usdc: float | None = None,

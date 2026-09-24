@@ -13,6 +13,7 @@ from whalescan.parsers import (
     parse_leaderboard,
     parse_many,
     parse_market,
+    parse_open_position,
     parse_price_history,
     parse_trade,
 )
@@ -147,3 +148,12 @@ def test_real_closed_markets_resolve_to_a_winner():
 def test_market_dataclass_is_hashable():
     assert hash(parse_market(MARKET)) == hash(parse_market(MARKET))
     assert isinstance(parse_market(MARKET), Market)
+
+
+def test_unredeemed_open_position_parses_as_resolved_history_row():
+    row = {"proxyWallet": "0xD38B", "asset": "9", "conditionId": "0xAB", "avgPrice": 0.55, "totalBought": 410900.73,
+           "realizedPnl": 0, "curPrice": 0, "outcome": "Packers", "outcomeIndex": 0, "title": "Packers vs. Bears",
+           "eventSlug": "nfl-gb-chi", "redeemable": True, "size": 410900.73}
+    p = parse_open_position(row)
+    assert (p.wallet, p.condition_id, p.cur_price, p.total_bought) == ("0xd38b", "0xab", 0.0, 410900.73)
+    assert p.ts == 0  # no close time exists; 0 keeps it out of incremental max(ts)

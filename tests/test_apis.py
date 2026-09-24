@@ -146,3 +146,21 @@ async def test_clob_book_and_history():
 def test_page_constants_match_api_limits():
     assert data_api_module.CLOSED_PAGE == 50
     assert data_api_module.MAX_OFFSET == 10_000
+
+
+async def test_redeemable_positions_returns_only_resolved_rows_across_pages():
+    seen = []
+
+    def handler(request):
+        q = request.url.params
+        seen.append((request.url.path, q["user"], q["sizeThreshold"], int(q["offset"])))
+        off = int(q["offset"])
+        n = 500 if off == 0 else 3
+        rows = [dict(pos(off + k, 0), redeemable=(k % 2 == 0), curPrice=0 if k % 2 == 0 else 0.4) for k in range(n)]
+        return httpx.Response(200, json=rows)
+
+    hist = await DataApi(http(handler)).redeemable_positions("0xw")
+    assert hist.complete
+    assert len(hist.positions) == 250 + 2
+    assert all(p.ts == 0 for p in hist.positions)
+    assert seen == [("/positions", "0xw", "0", 0), ("/positions", "0xw", "0", 500)]

@@ -95,6 +95,25 @@ def _closed_position(d: dict[str, Any]) -> ClosedPosition:
     )
 
 
+def _open_position(d: dict[str, Any]) -> ClosedPosition:
+    """A row from /positions. Resolved-but-unredeemed rows (mostly losers, which nobody redeems for $0)
+    never reach /closed-positions, so they are folded into the same history. ts=0: no close time exists."""
+    return ClosedPosition(
+        wallet=str(d["proxyWallet"]).lower(),
+        asset=str(d["asset"]),
+        condition_id=str(d["conditionId"]).lower(),
+        avg_price=float(d["avgPrice"]),
+        total_bought=float(d.get("totalBought") or d.get("size") or 0.0),
+        realized_pnl=float(d.get("realizedPnl") or 0.0),
+        cur_price=float(d.get("curPrice") or 0.0),
+        outcome=str(d.get("outcome") or ""),
+        outcome_index=int(d["outcomeIndex"]),
+        title=str(d.get("title") or ""),
+        event_slug=str(d.get("eventSlug") or ""),
+        ts=0,
+    )
+
+
 def _market(d: dict[str, Any]) -> Market:
     fees = d.get("feeSchedule") or {}
     events = d.get("events") or []
@@ -141,6 +160,7 @@ def _price_history(d: dict[str, Any]) -> list[PricePoint]:
 
 parse_trade = _guard("trade", _trade)
 parse_closed_position = _guard("closed position", _closed_position)
+parse_open_position = _guard("open position", _open_position)
 parse_market = _guard("market", _market)
 parse_leaderboard = _guard("leaderboard entry", _leaderboard)
 parse_book = _guard("book", _book)
