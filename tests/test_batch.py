@@ -117,6 +117,7 @@ async def test_batch_produces_signal_for_certified_whale(tmp_path):
     assert s["status"] == "SIGNAL" and s["tier"] == "A"
     assert s["quote"]["vwap"] == pytest.approx(0.41) and s["history"] and s["wallet_name"].startswith("name")
     assert {c["code"] for c in s["checks"]} == {f"G{i}" for i in range(1, 8)}
+    assert s["asset"] == "live-yes"
     whales = read(tmp_path, "whales.json")
     assert whales[0]["wallet"] == "0xwhale" and whales[0]["certified"] and whales[0]["recent"]
     meta = read(tmp_path, "meta.json")

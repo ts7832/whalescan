@@ -1,15 +1,27 @@
 import { fmtAge, fmtUtc } from '../format';
 import type { Meta } from '../types';
 
-export function StatusBar({ meta, now }: { meta: Meta; now: number }) {
+export function StatusBar({ meta, now, linkUp }: { meta: Meta; now: number; linkUp: boolean | null }) {
   const age = now - meta.generated_at;
+  const live = meta.mode === 'LIVE';
   return (
     <header className="statusbar">
       <div className="brand">WHALESCAN <span className="dim">// POLYMARKET INTELLIGENCE</span></div>
       <div className="status-items">
-        <span className={`badge ${age > 8 * 3600 ? 'warn' : 'ok'}`}>
-          ● {meta.mode} · {fmtUtc(meta.generated_at)} · {fmtAge(age)} AGO
-        </span>
+        {live ? (
+          <>
+            <span className={`badge ${linkUp ? 'ok' : 'bad'}`}>● {linkUp ? 'LIVE' : 'LINK DOWN'}</span>
+            <span>FEED LAT <b>{meta.feed_latency_ms == null ? '—' : `${meta.feed_latency_ms}MS`}</b></span>
+            {Object.entries(meta.link ?? {}).map(([k, v]) => (
+              <span key={k}>{k.toUpperCase()} <b className={v === 'connected' ? 'green' : 'amber'}>{v.toUpperCase()}</b></span>
+            ))}
+            <span>BOOKS <b>{meta.watching ?? 0}</b></span>
+          </>
+        ) : (
+          <span className={`badge ${age > 8 * 3600 ? 'warn' : 'ok'}`}>
+            ● {meta.mode} · {fmtUtc(meta.generated_at)} · {fmtAge(age)} AGO
+          </span>
+        )}
         <span>SCANNED <b>{meta.counts.wallets_scanned}</b></span>
         <span>TESTABLE <b>{meta.counts.testable}</b></span>
         <span>CERTIFIED <b className="green">{meta.counts.certified_wallets}</b></span>

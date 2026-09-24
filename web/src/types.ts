@@ -1,4 +1,4 @@
-export type Status = 'SIGNAL' | 'REJECTED' | 'EXIT' | 'CONFLICT' | 'EXPIRED';
+export type Status = 'SIGNAL' | 'STALE' | 'REJECTED' | 'EXIT' | 'CONFLICT' | 'EXPIRED';
 
 export interface Check { code: string; passed: boolean; detail: string }
 
@@ -19,6 +19,7 @@ export interface Signal {
   category: string;
   wallet: string;
   wallet_name: string;
+  asset: string;
   question: string;
   market_slug: string;
   event_slug: string;
@@ -85,8 +86,17 @@ export interface Meta {
     certified_wallets: number; signals: number; contacts: number;
   };
   params: { bh_q: number; min_usdc: number; conviction_k: number; follow_size_usdc: number; min_net_edge: number; signal_lookback_h: number };
-  errors: { api: number };
+  errors: { api: number; ws_dropped?: number };
   validation_generated_at: number | null;
+  link?: Record<string, string>;
+  feed_latency_ms?: number | null;
+  watching?: number;
 }
 
 export interface Snapshot { meta: Meta; signals: Signal[]; contacts: Signal[]; whales: Whale[]; validation: Validation | null }
+
+export type LiveMessage =
+  | { type: 'state'; data: Snapshot }
+  | { type: 'status'; data: Meta }
+  | { type: 'contact' | 'signal' | 'signal_update'; data: Signal }
+  | { type: 'book'; data: { asset: string; quote: Quote } };

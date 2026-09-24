@@ -6,6 +6,7 @@ import { SignalsPanel } from './components/SignalsPanel';
 import { StatusBar } from './components/StatusBar';
 import { ValidationPanel } from './components/ValidationPanel';
 import { loadSnapshot } from './data';
+import { applyMessage, connectLive, tryLive } from './live';
 import { pickWallet } from './select';
 import type { Snapshot } from './types';
 
@@ -18,12 +19,22 @@ export default function App() {
   const [walletPick, setWalletPick] = useState<string | null>(null);
   const [category, setCategory] = useState('ALL');
   const [now, setNow] = useState(nowSeconds);
+  const [linkUp, setLinkUp] = useState<boolean | null>(null);
   const filterRef = useRef<HTMLSelectElement>(null);
 
   useEffect(() => {
-    loadSnapshot().then(setSnap).catch((e: unknown) => setError(String(e instanceof Error ? e.message : e)));
+    let stopLive: (() => void) | undefined;
+    (async () => {
+      const live = await tryLive();
+      if (live) {
+        setSnap(live);
+        stopLive = connectLive((m) => setSnap((s) => (s ? applyMessage(s, m) : s)), setLinkUp);
+      } else {
+        setSnap(await loadSnapshot());
+      }
+    })().catch((e: unknown) => setError(String(e instanceof Error ? e.message : e)));
     const t = setInterval(() => setNow(nowSeconds()), 1000);
-    return () => clearInterval(t);
+    return () => { clearInterval(t); stopLive?.(); };
   }, []);
 
   const categories = useMemo(() => [...new Set((snap?.signals ?? []).map((s) => s.category))].sort(), [snap]);
@@ -53,7 +64,7 @@ export default function App() {
 
   return (
     <>
-      <StatusBar meta={snap.meta} now={now} />
+      <StatusBar meta={snap.meta} now={now} linkUp={linkUp} />
       <main className="grid">
         <SignalsPanel
           signals={signals} selectedId={selected?.id ?? null}

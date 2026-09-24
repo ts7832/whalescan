@@ -44,7 +44,7 @@ export function SignalsPanel({ signals, selectedId, onSelect, meta, now, categor
 function SignalCard({ s, selected, onSelect, now }: { s: Signal; selected: boolean; onSelect: () => void; now: number }) {
   const bookAge = s.quote ? now - s.quote.book_as_of : null;
   return (
-    <button className={`signal tier-${s.tier} ${selected ? 'selected' : ''}`} onClick={onSelect}>
+    <button className={`signal tier-${s.tier} ${s.status === 'STALE' ? 'is-stale-signal' : ''} ${selected ? 'selected' : ''}`} onClick={onSelect}>
       <div className="row">
         <span className={`tier tier-${s.tier}`}>TIER {s.tier}</span>
         <span className="dim">{s.category}</span>
@@ -62,6 +62,7 @@ function SignalCard({ s, selected, onSelect, now }: { s: Signal; selected: boole
         <dt>FOLLOW</dt><dd>{fmtPrice(s.quote?.vwap)}</dd>
         <dt>WHALES</dt><dd>{s.consensus.length}</dd>
       </dl>
+      {s.status === 'STALE' && <div className="stale">STALE — LIVE PRICE PAST MAX ENTRY</div>}
       {bookAge != null && bookAge > 3600 && <div className="stale">BOOK {fmtAge(bookAge)} OLD — RE-CHECK PRICE BEFORE ENTRY</div>}
     </button>
   );

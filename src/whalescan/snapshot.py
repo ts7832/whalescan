@@ -61,6 +61,7 @@ def evaluation_json(e: Evaluation, market: Market | None, names: Mapping[str, st
         "tier": e.tier,
         "category": e.category,
         "wallet": ev.wallet,
+        "asset": ev.asset,
         "wallet_name": names.get(ev.wallet, ""),
         "question": market.question if market else ev.title,
         "market_slug": market.slug if market else "",
