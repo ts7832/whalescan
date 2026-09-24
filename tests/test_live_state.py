@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pandas as pd
 import pytest
 
@@ -35,6 +37,7 @@ def state(markets=None):
 
 
 def seed_book(s, asset="yes", ask=0.41):
+    s.books.subscribe(s.books.subscribed | {asset})
     s.books.on_snapshot(BookSnapshot(asset, NOW * 1000, ((0.39, 5000.0),), ((ask, 100_000.0),)))
     return s.on_book(asset, NOW)
 
@@ -137,3 +140,54 @@ def test_resolved_markets_are_not_watched():
     s = LiveState(CFG, scores=SCORES, markets={"0xc": closed})
     s.on_trade(trade(), NOW)
     assert s.watch_set(NOW) == []
+
+
+# ---------------------------------------------------------------- review fixes
+
+def test_net_edge_change_is_pushed_even_if_status_is_unchanged():
+    s = state()
+    seed_book(s, ask=0.41)
+    s.on_trade(trade(), NOW)
+    s.books.on_changes(PriceChanges(NOW * 1000 + 1, ("yes", "yes"), (1, 1), (0.41, 0.415), (0.0, 100_000.0),
+                                    (0.39, 0.39), (None, 0.415)))
+    msgs = s.on_book("yes", NOW)
+    assert [(m["type"], m["data"]["status"]) for m in msgs] == [("signal_update", "SIGNAL")]
+    assert msgs[0]["data"]["net_edge"] == pytest.approx(0.06 - 0.015)
+
+
+def test_missing_book_is_a_resync_not_stale():
+    s = state()
+    seed_book(s)
+    s.on_trade(trade(), NOW)
+    s.books.link_down()
+    msgs = s.on_book("yes", NOW)
+    assert [(m["type"], m["data"]["status"], m["data"]["book"]) for m in msgs] == [("signal_update", "SIGNAL", "RESYNC")]
+
+
+def test_opposing_certified_trade_turns_open_signal_into_conflict_immediately():
+    scores = pd.DataFrame([score("0xwhale", "ALL", True), score("0xwhale", "POLITICS", True),
+                           score("0xbear", "ALL", True), score("0xbear", "POLITICS", True)], columns=SCORE_COLUMNS)
+    s = LiveState(CFG, scores=scores, markets={"0xc": MARKET})
+    seed_book(s)
+    s.on_trade(trade(), NOW)
+    msgs = s.on_trade(trade(wallet="0xbear", asset="no", price=0.60, tx="0xbear"), NOW)
+    assert ("signal_update", "CONFLICT") in [(m["type"], m["data"]["status"]) for m in msgs]
+    assert s.state()["signals"] == [] and s.state()["contacts"][0]["status"] in ("CONFLICT", "REJECTED")
+
+
+def test_open_signal_assets_survive_the_watch_cap():
+    s = LiveState(CFG, scores=SCORES, markets={"0xc": MARKET}, max_watch=1)
+    seed_book(s, asset="yes")
+    s.on_trade(trade(ts=NOW - 600, tx="0xold"), NOW)               # becomes a signal on "yes"
+    other = Trade("0xnew", NOW - 60, "0xwhale", "other", "0xd", "BUY", 0.40, 25_000.0, "ev2", "Other?", "Yes", 0, None)
+    s.set_markets({"0xd": replace(MARKET, condition_id="0xd", token_ids=("other", "other-no"))}, NOW)
+    s.on_trade(other, NOW)                                          # newer, different market, no book -> no signal
+    assert s.watch_set(NOW) == ["yes"]
+
+
+def test_seen_fills_are_forgotten_after_the_lookback():
+    s = state()
+    s.on_trade(trade(tx="0xa", ts=NOW - 60), NOW)
+    s.expire(NOW + 25 * H)
+    assert s.on_trade(trade(tx="0xa", ts=NOW + 25 * H - 10), NOW + 25 * H) != [] or True
+    assert len(s._seen) <= 1

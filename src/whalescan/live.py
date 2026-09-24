@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pandas as pd
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -40,18 +41,22 @@ RTDS_URL = "wss://ws-live-data.polymarket.com"
 RTDS_SUBSCRIBE = json.dumps({"action": "subscribe", "subscriptions": [{"topic": "activity", "type": "trades"}]})
 CLOB_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 PERSIST_MIN_USDC = 1_000.0
-BOOK_PUSH_INTERVAL_S = 0.25  # at most 4 book updates per token per second to the browser
+BOOK_PUSH_INTERVAL_S = 0.25  # dirty books are flushed to the browser at most 4 times per second
 MARKET_RETRY_S = 600
+WATCH_DEBOUNCE_S = 30        # resubscribing drops and re-sends every book: do it at most this often
+RESYNC_MIN_S, RESYNC_MAX_S = 5, 300
+LINK_DOWN_STATES = {"disconnected", "silent", "backoff", "stopped"}
 
 
 class Hub:
     """Fan-out of dashboard messages. Each client has a bounded queue; a slow client loses messages
     instead of growing memory without limit (it gets a full state again when it reconnects)."""
 
-    def __init__(self, max_queue: int = 1000) -> None:
+    def __init__(self, max_queue: int = 1000, state_provider: Callable[[], Any] | None = None) -> None:
         self._clients: list[tuple[asyncio.Queue[Any], asyncio.AbstractEventLoop | None]] = []
         self._callbacks: list[Callable[[Any], None]] = []
         self._max = max_queue
+        self._state = state_provider
         self.dropped = 0
 
     def add(self) -> asyncio.Queue[Any]:
@@ -73,7 +78,13 @@ class Hub:
         try:
             q.put_nowait(msg)
         except asyncio.QueueFull:
+            # A client that fell behind would silently diverge (e.g. miss a signal's EXPIRED). Instead,
+            # throw away its backlog and give it one fresh full state to rebuild from.
             self.dropped += 1
+            while not q.empty():
+                q.get_nowait()
+            if self._state is not None:
+                q.put_nowait({"type": "state", "data": self._state()})
 
     def broadcast(self, msg: Any) -> None:
         for fn in self._callbacks:
@@ -99,6 +110,11 @@ def create_app(state_provider: Callable[[], dict[str, Any]], hub: Hub, static_di
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket) -> None:
+        # Browsers let any page open ws://127.0.0.1; only the dashboard's own origin may read the feed.
+        origin = websocket.headers.get("origin")
+        if origin and urlsplit(origin).netloc != websocket.headers.get("host"):
+            await websocket.close(code=1008)
+            return
         await websocket.accept()
         q = hub.add()
         try:
@@ -144,16 +160,18 @@ class Station:
         self.snapshot_meta = _read_json(snap_dir / "meta.json") or {}
         names = {w["wallet"]: w.get("name", "") for w in self.whales}
         self.state = LiveState(cfg, scores=scores, names=names)
-        self.hub = Hub()
+        self.hub = Hub(state_provider=self.snapshot_state)
         self.store = Store(cfg.path(cfg.paths.research_db).with_name("live.duckdb"))
         self.watch: list[str] = []
+        self._last_resubscribe = float("-inf")
+        self._dirty_books: set[str] = set()
+        self._resync_after: dict[str, tuple[float, float]] = {}  # asset -> (next attempt, current delay)
         self.clob_socket: Any = None
         self.rtds_socket: Any = None
         self.links: dict[str, str] = {"rtds": "starting", "clob": "starting"}
         self.feed_latency_ms: int | None = None
         self._pending: list[Trade] = []
         self._market_asked: dict[str, float] = {}
-        self._last_book_push: dict[str, float] = {}
         self._stopping = False
 
     # ------------------------------------------------------------------ inputs
@@ -178,11 +196,12 @@ class Station:
             return
         trade, sent_ms = parsed
         self.feed_latency_ms = max(0, int(self.clock() * 1000) - sent_ms)
-        if trade.usdc >= PERSIST_MIN_USDC or trade.wallet in self.state.scores.certified_wallets():
+        if trade.usdc >= PERSIST_MIN_USDC or trade.wallet in self.state.certified_wallets:
             self._pending.append(trade)
         self._emit(self.state.on_trade(trade, self._now()))
 
     async def handle_clob(self, raw: str) -> None:
+        self.state.books.heartbeat(int(self.clock() * 1000))  # even a PONG proves the link is alive
         touched: set[str] = set()
         for item in parse_clob(raw):
             if isinstance(item, BookSnapshot):
@@ -194,18 +213,18 @@ class Station:
         now = self._now()
         for asset in touched:
             self._emit(self.state.on_book(asset, now))
-            self._push_book(asset)
+            self._dirty_books.add(asset)
 
-    def _push_book(self, asset: str) -> None:
-        t = self.clock()
-        if t - self._last_book_push.get(asset, 0.0) < BOOK_PUSH_INTERVAL_S:
-            return
-        self._last_book_push[asset] = t
-        q = self.state.books.quote(asset, self.cfg.gate.follow_size_usdc)
-        if q is not None:
-            self.hub.broadcast({"type": "book", "data": {"asset": asset, "quote": {
-                "vwap": q.vwap, "complete": q.complete, "book_as_of": q.book_as_of, "best_bid": q.best_bid,
-                "best_ask": q.best_ask, "microprice": q.microprice, "levels": [list(x) for x in q.levels]}}})
+    def flush_books(self) -> None:
+        """Push the latest quote of every changed book that backs an open signal (coalesced, so the final
+        state of a burst is never lost). Books without a signal aren't sent: nothing on screen uses them."""
+        dirty, self._dirty_books = self._dirty_books, set()
+        for asset in sorted(dirty & self.state.signal_assets()):
+            q = self.state.books.quote(asset, self.cfg.gate.follow_size_usdc)
+            if q is not None:
+                self.hub.broadcast({"type": "book", "data": {"asset": asset, "quote": {
+                    "vwap": q.vwap, "complete": q.complete, "book_as_of": q.book_as_of, "best_bid": q.best_bid,
+                    "best_ask": q.best_ask, "microprice": q.microprice, "levels": [list(x) for x in q.levels]}}})
 
     # ------------------------------------------------------------------ maintenance
 
@@ -218,12 +237,18 @@ class Station:
             log.warning("%s failed: %s", what, e)
             return None
 
-    async def _snapshot_book(self, asset: str) -> None:
+    async def _snapshot_book(self, asset: str) -> bool:
         snap = await self._guard(self.clob.book(asset), f"book {asset}")
-        if snap is not None:
-            self.state.books.on_snapshot(snap)
-            self._emit(self.state.on_book(asset, self._now()))
-            self._push_book(asset)
+        if snap is None:
+            return False
+        self.state.books.on_snapshot(snap)
+        self._emit(self.state.on_book(asset, self._now()))
+        self._dirty_books.add(asset)
+        return asset not in self.state.books.desynced
+
+    def apply_subscription(self) -> None:
+        """Called whenever the CLOB socket (re)subscribes: only the subscribed books may be trusted."""
+        self.state.books.subscribe(self.watch)
 
     async def tick(self) -> None:
         now = self._now()
@@ -238,17 +263,22 @@ class Station:
                 self._emit(self.state.set_markets(found, now))
 
         watch = self.state.watch_set(now)
-        if set(watch) != set(self.watch):
-            added, removed = set(watch) - set(self.watch), set(self.watch) - set(watch)
+        if set(watch) != set(self.watch) and now - self._last_resubscribe >= WATCH_DEBOUNCE_S:
             self.watch = watch
-            self.state.books.forget(removed)
+            self._last_resubscribe = now
             if self.clob_socket is not None:
-                self.clob_socket.reconnect_now()  # resubscribe with the new token set
-            for asset in sorted(added):  # don't wait for the socket: seed books over REST now
-                await self._snapshot_book(asset)
+                self.clob_socket.reconnect_now()  # the new subscription re-sends a snapshot of every book
 
-        for asset in sorted(self.state.books.desynced):
-            await self._snapshot_book(asset)
+        if self.links.get("clob") not in LINK_DOWN_STATES:  # REST can't help while deltas are being missed
+            for asset in sorted(self.state.books.desynced):
+                due, delay = self._resync_after.get(asset, (0.0, RESYNC_MIN_S / 2))
+                if now < due:
+                    continue
+                if await self._snapshot_book(asset):
+                    self._resync_after.pop(asset, None)
+                else:  # e.g. 404 for a market that just resolved: back off instead of hammering
+                    delay = min(RESYNC_MAX_S, delay * 2)
+                    self._resync_after[asset] = (now + delay, delay)
 
         if self._pending:
             self.store.upsert_trades(self._pending)
@@ -315,10 +345,18 @@ class Station:
     def _on_status(self, name: str) -> Callable[[str, dict[str, Any]], None]:
         def update(state: str, info: dict[str, Any]) -> None:
             self.links[name] = state
+            if name == "clob" and state in LINK_DOWN_STATES:
+                self.state.books.link_down()
         return update
 
     def _clob_subscription(self) -> list[str]:
+        self.apply_subscription()
         return [json.dumps({"assets_ids": self.watch, "type": "market"})] if self.watch else []
+
+    async def _book_pusher(self) -> None:
+        while not self._stopping:
+            self.flush_books()
+            await asyncio.sleep(BOOK_PUSH_INTERVAL_S)
 
     async def _maintenance(self) -> None:
         while not self._stopping:
@@ -356,6 +394,7 @@ class Station:
                 tg.create_task(self.rtds_socket.run())
                 tg.create_task(self.clob_socket.run())
                 tg.create_task(self._maintenance())
+                tg.create_task(self._book_pusher())
         finally:
             if self._pending:
                 self.store.upsert_trades(self._pending)

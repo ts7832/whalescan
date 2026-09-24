@@ -79,14 +79,18 @@ async def test_trade_flows_to_signal_through_maintenance(tmp_path):
     s.hub.subscribe_callback(got.append)
     await s.handle_rtds(rtds_frame())
     assert s.feed_latency_ms == 1000
-    await s.tick()                     # fetch unknown market, react to watch-set change, snapshot the new book
-    assert gamma.asked == [{"0xc"}] and s.clob_socket.reconnects == 1 and clob.books == ["yes"]
+    await s.tick()                     # fetch unknown market, react to watch-set change
+    assert gamma.asked == [{"0xc"}] and s.clob_socket.reconnects == 1
+    s.apply_subscription()             # the (fake) CLOB socket resubscribed; its book snapshot arrives:
+    await s.handle_clob(json.dumps({"event_type": "book", "asset_id": "yes", "timestamp": str(NOW * 1000),
+                                    "bids": [{"price": "0.39", "size": "5000"}], "asks": [{"price": "0.41", "size": "100000"}]}))
     types = [(m["type"], m["data"].get("status")) for m in got if m["type"] in ("contact", "signal")]
     assert ("signal", "SIGNAL") in types
 
 
 async def test_clob_messages_update_books_and_resync_on_mismatch(tmp_path):
     s, gamma, clob = station(tmp_path)
+    s.state.books.subscribe({"yes"})
     await s.handle_clob(json.dumps({"event_type": "book", "asset_id": "yes", "timestamp": str(NOW * 1000),
                                     "bids": [{"price": "0.39", "size": "10"}], "asks": [{"price": "0.41", "size": "10"}]}))
     await s.handle_clob(json.dumps({"event_type": "price_change", "market": "0xc", "timestamp": str(NOW * 1000 + 5),
@@ -118,9 +122,71 @@ def test_http_state_and_websocket_push(tmp_path):
             assert ws.receive_json() == {"type": "contact", "data": {"id": "x"}}
 
 
-def test_hub_drops_messages_for_a_client_that_cannot_keep_up():
-    hub = Hub(max_queue=2)
+
+
+def signal_frame(tx="0xt1"):
+    return rtds_frame(tx=tx)
+
+
+async def _open_signal(s):
+    await s.handle_rtds(signal_frame())
+    await s.tick()          # market fetched; watch set applied; subscription pending
+    s.apply_subscription()  # the CLOB socket (fake) reconnected with the new set
+    await s.handle_clob(json.dumps({"event_type": "book", "asset_id": "yes", "timestamp": str(NOW * 1000),
+                                    "bids": [{"price": "0.39", "size": "5000"}], "asks": [{"price": "0.41", "size": "100000"}]}))
+
+
+async def test_book_pushes_are_coalesced_and_the_last_state_is_flushed(tmp_path):
+    s, gamma, clob = station(tmp_path)
+    got = []
+    s.hub.subscribe_callback(got.append)
+    await _open_signal(s)
+    for px in ("0.395", "0.396"):   # a burst inside one throttle window (bids stay below the 0.41 ask)
+        await s.handle_clob(json.dumps({"event_type": "price_change", "market": "0xc", "timestamp": str(NOW * 1000 + 9),
+                                        "price_changes": [{"asset_id": "yes", "price": px, "size": "10", "side": "BUY",
+                                                           "hash": "h", "best_bid": px, "best_ask": "0.41"}]}))
+    got.clear()
+    s.flush_books()
+    books = [m for m in got if m["type"] == "book"]
+    assert len(books) == 1 and books[0]["data"]["quote"]["best_bid"] == 0.396
+
+
+async def test_watch_changes_are_debounced(tmp_path):
+    s, gamma, clob = station(tmp_path)
+    await s.handle_rtds(signal_frame())
+    await s.tick()
+    await s.handle_rtds(rtds_frame(tx="0xt2", wallet="0xwhale", price=0.4).replace('"asset": "yes"', '"asset": "other"'))
+    await s.tick()
+    assert s.clob_socket.reconnects == 1       # second change waits for the debounce window
+    s.clock = lambda: NOW + 31
+    await s.tick()
+    assert s.clob_socket.reconnects == 2
+
+
+async def test_clob_link_down_disables_quotes(tmp_path):
+    s, gamma, clob = station(tmp_path)
+    await _open_signal(s)
+    s._on_status("clob")("backoff", {})
+    assert s.state.books.quote("yes", 100.0) is None
+
+
+def test_slow_client_gets_a_fresh_state_instead_of_gaps():
+    hub = Hub(max_queue=2, state_provider=lambda: {"fresh": True})
     q = hub.add()
     for i in range(5):
         hub.broadcast({"i": i})
-    assert q.qsize() == 2 and hub.dropped == 3
+    items = [q.get_nowait() for _ in range(q.qsize())]
+    assert items[-1] == {"type": "state", "data": {"fresh": True}}
+
+
+def test_websocket_rejects_foreign_origins():
+    import pytest
+    from starlette.websockets import WebSocketDisconnect
+
+    app = create_app(lambda: {"meta": {}}, Hub(), static_dir=None)
+    with TestClient(app) as c:
+        with pytest.raises(WebSocketDisconnect):
+            with c.websocket_connect("/ws", headers={"origin": "https://evil.example"}) as ws:
+                ws.receive_json()
+        with c.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
+            assert ws.receive_json()["type"] == "state"

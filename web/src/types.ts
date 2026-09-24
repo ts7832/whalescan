@@ -40,6 +40,8 @@ export interface Signal {
   consensus: string[];
   checks: Check[];
   history: { t: number; p: number }[] | null;
+  /** live mode: RESYNC while the book is re-fetched and the price is unconfirmed */
+  book?: 'OK' | 'RESYNC';
 }
 
 export interface CategoryScore {

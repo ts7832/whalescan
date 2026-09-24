@@ -154,3 +154,45 @@ async def test_reconnect_now_forces_a_fresh_subscription():
 def test_rejects_bad_backoff():
     with pytest.raises(ValueError):
         ReconnectingWS("x", "ws://x", subscribe=list, on_message=print, backoff_min_s=0)
+
+
+async def test_handler_exception_does_not_kill_the_connection():
+    async def handler(ws, n, srv):
+        await ws.recv()
+        await ws.send("boom")
+        await ws.send("ok")
+        await recv_all(ws, srv)
+
+    got = []
+
+    async def on_message(raw):
+        if raw == "boom":
+            raise RuntimeError("bug in handler")
+        got.append(raw)
+
+    async with Server(handler) as srv:
+        c = ReconnectingWS("t", srv.url, subscribe=lambda: ["SUB"], on_message=on_message, rng=lambda: 0.5,
+                           backoff_min_s=0.01)
+        task = asyncio.create_task(c.run())
+        await wait_for(lambda: got == ["ok"])
+        assert srv.connections == 1
+        c.stop()
+        await asyncio.wait_for(task, 2)
+
+
+async def test_backoff_is_not_reset_by_connections_that_die_before_any_message():
+    delays = []
+
+    async def handler(ws, n, srv):
+        await ws.close()   # accepts the handshake, then drops immediately
+
+    async with Server(handler) as srv:
+        async def fake_sleep(s):
+            delays.append(s)
+            if len(delays) >= 3:
+                c.stop()
+
+        c = ReconnectingWS("t", srv.url, subscribe=lambda: [], on_message=lambda raw: None, rng=lambda: 0.5,
+                           backoff_min_s=1.0, backoff_max_s=8.0, sleep=fake_sleep)
+        await asyncio.wait_for(c.run(), 5)
+    assert delays == [1.0, 2.0, 4.0]

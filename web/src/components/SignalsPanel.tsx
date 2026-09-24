@@ -63,6 +63,7 @@ function SignalCard({ s, selected, onSelect, now }: { s: Signal; selected: boole
         <dt>WHALES</dt><dd>{s.consensus.length}</dd>
       </dl>
       {s.status === 'STALE' && <div className="stale">STALE — LIVE PRICE PAST MAX ENTRY</div>}
+      {s.book === 'RESYNC' && <div className="stale">BOOK RESYNCING — PRICE UNCONFIRMED</div>}
       {bookAge != null && bookAge > 3600 && <div className="stale">BOOK {fmtAge(bookAge)} OLD — RE-CHECK PRICE BEFORE ENTRY</div>}
     </button>
   );

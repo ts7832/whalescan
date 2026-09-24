@@ -41,6 +41,7 @@ class ReconnectingWS:
         self._stopped = False
         self._ws: Any = None
         self._skip_backoff = False
+        self._session_messages = 0
         self.messages = 0
         self.connects = 0
         self.last_message_at: float | None = None
@@ -84,10 +85,14 @@ class ReconnectingWS:
                     self._status("silent", seconds=self._dead_after)
                     return
                 self.messages += 1
+                self._session_messages += 1
                 self.last_message_at = time.time()
-                result = self._on_message(raw if isinstance(raw, str) else raw.decode())
-                if inspect.isawaitable(result):
-                    await result
+                try:
+                    result = self._on_message(raw if isinstance(raw, str) else raw.decode())
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception:  # noqa: BLE001 — a handler bug must not take the feed down; log it loudly
+                    log.exception("%s: message handler failed", self.name)
         finally:
             if pinger:
                 pinger.cancel()
@@ -99,13 +104,15 @@ class ReconnectingWS:
                 async with connect(self.url, ping_interval=self._ping_interval, ping_timeout=self._ping_interval * 2,
                                    max_size=None, open_timeout=20) as ws:
                     self._ws = ws
-                    attempt = 0
+                    self._session_messages = 0
                     await self._session(ws)
             except (OSError, WebSocketException, TimeoutError) as e:
                 if not self._stopped:
                     self._status("disconnected", error=repr(e)[:200])
             finally:
                 self._ws = None
+            if self._session_messages > 0:
+                attempt = 0  # only a connection that actually delivered data proves the server is healthy
             if self._stopped:
                 break
             if self._skip_backoff:
