@@ -191,3 +191,10 @@ def test_seen_fills_are_forgotten_after_the_lookback():
     s.expire(NOW + 25 * H)
     assert s.on_trade(trade(tx="0xa", ts=NOW + 25 * H - 10), NOW + 25 * H) != [] or True
     assert len(s._seen) <= 1
+
+
+def test_fills_sharing_a_transaction_at_different_prices_all_count():
+    s = state()
+    s.on_trade(trade(tx="0xsweep", usdc=3_000.0, price=0.40), NOW)
+    msgs = s.on_trade(trade(tx="0xsweep", usdc=3_000.0, price=0.41), NOW)
+    assert msgs and msgs[0]["data"]["usdc"] == pytest.approx(6_000.0) and msgs[0]["data"]["n_fills"] == 2

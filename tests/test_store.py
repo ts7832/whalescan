@@ -152,3 +152,29 @@ def test_positions_frame_carries_fetch_time(tmp_path):
         s.upsert_positions([position()])
         s.record_wallet_fetch("0xw", fetched_at=77, complete=True, source="x")
         assert s.positions_frame()["fetched_at"].tolist() == [77]
+
+
+def test_one_order_sweeping_several_price_levels_keeps_every_fill(tmp_path):
+    with Store(tmp_path / "db.duckdb") as s:
+        a = trade(tx="0xsweep")
+        b = Trade("0xsweep", a.ts, a.wallet, a.asset, a.condition_id, a.side, 0.41, 50.0, a.event_slug, a.title,
+                  a.outcome, a.outcome_index, None)
+        assert s.upsert_trades([a, b, a]) == 2      # the exact repeat collapses, the second price level stays
+        assert len(s.trades_frame()) == 2
+
+
+def test_old_trades_primary_key_is_migrated_without_losing_rows(tmp_path):
+    import duckdb
+
+    path = tmp_path / "db.duckdb"
+    con = duckdb.connect(str(path))
+    con.execute("""CREATE TABLE trades (tx_hash VARCHAR, ts BIGINT, wallet VARCHAR, asset VARCHAR, condition_id VARCHAR,
+                   side VARCHAR, price DOUBLE, size DOUBLE, event_slug VARCHAR, title VARCHAR, outcome VARCHAR,
+                   outcome_index INTEGER, fee DOUBLE, PRIMARY KEY (tx_hash, wallet, asset, side))""")
+    con.execute("INSERT INTO trades VALUES ('0x1', 1, '0xw', 'a1', '0xc1', 'BUY', 0.4, 100, 'ev', 't', 'Yes', 0, NULL)")
+    con.close()
+    with Store(path) as s:
+        assert len(s.trades_frame()) == 1
+        extra = Trade("0x1", 1, "0xw", "a1", "0xc1", "BUY", 0.41, 50.0, "ev", "t", "Yes", 0, None)
+        s.upsert_trades([extra])
+        assert len(s.trades_frame()) == 2

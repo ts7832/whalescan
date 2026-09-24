@@ -37,7 +37,7 @@ class LiveState:
         self.max_watch = max_watch
         self._set_scores(scores)
         self._open_groups: dict[tuple[str, str, str], list[Trade]] = {}
-        self._seen: dict[tuple[str, str, str, str], int] = {}  # fill -> trade ts (evicted after the lookback)
+        self._seen: dict[tuple[str, str, str, str, float, float], int] = {}  # fill -> trade ts (evicted after the lookback)
         self.events: dict[str, PositionEvent] = {}
         self._by_asset: dict[str, set[str]] = defaultdict(set)
         self._by_cid: dict[str, set[str]] = defaultdict(set)
@@ -49,7 +49,7 @@ class LiveState:
     # ---------------------------------------------------------------- inputs
 
     def on_trade(self, t: Trade, now: int) -> list[Message]:
-        fill = (t.tx_hash, t.wallet, t.asset, t.side)
+        fill = (t.tx_hash, t.wallet, t.asset, t.side, t.price, t.size)  # a sweep = several fills, one tx
         if fill in self._seen:
             return []
         self._seen[fill] = t.ts

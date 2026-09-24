@@ -15,11 +15,15 @@ import pandas as pd
 
 from whalescan.models import ClosedPosition, Market, Trade, resolved_winner
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS trades (
+# One order can sweep several price levels in one transaction: every (price, size) is a separate fill.
+TRADE_KEY = ["tx_hash", "wallet", "asset", "side", "price", "size"]
+TRADES_DDL = """CREATE TABLE {name} (
   tx_hash VARCHAR, ts BIGINT, wallet VARCHAR, asset VARCHAR, condition_id VARCHAR, side VARCHAR,
   price DOUBLE, size DOUBLE, event_slug VARCHAR, title VARCHAR, outcome VARCHAR, outcome_index INTEGER,
-  fee DOUBLE, PRIMARY KEY (tx_hash, wallet, asset, side));
+  fee DOUBLE, PRIMARY KEY (tx_hash, wallet, asset, side, price, size))"""
+
+SCHEMA = """
+{trades};
 CREATE TABLE IF NOT EXISTS positions (
   wallet VARCHAR, asset VARCHAR, condition_id VARCHAR, avg_price DOUBLE, total_bought DOUBLE,
   realized_pnl DOUBLE, cur_price DOUBLE, outcome VARCHAR, outcome_index INTEGER, title VARCHAR,
@@ -112,11 +116,30 @@ class Store:
             self._lock.acquire()
         try:
             self.con = duckdb.connect(str(db_path))
-            self.con.execute(SCHEMA)
+            exists = self.con.execute(
+                "SELECT count(*) FROM information_schema.tables WHERE table_name = 'trades'").fetchone()[0]
+            self.con.execute(SCHEMA.format(trades="" if exists else TRADES_DDL.format(name="trades")))
+            self._migrate_trades_key()
         except Exception:
             if self._lock:
                 self._lock.release()
             raise
+
+    def _migrate_trades_key(self) -> None:
+        """Databases created before multi-fill transactions were understood key trades on
+        (tx, wallet, asset, side), which silently dropped all but one fill of a sweep. Rebuild with the full key."""
+        row = self.con.execute(
+            """SELECT constraint_column_names FROM duckdb_constraints()
+               WHERE table_name = 'trades' AND constraint_type = 'PRIMARY KEY'""").fetchone()
+        if row is None or list(row[0]) == TRADE_KEY:
+            return
+        cols = ", ".join(TRADE_COLS)
+        self.con.execute("BEGIN")
+        self.con.execute(TRADES_DDL.format(name="trades_v2"))
+        self.con.execute(f"INSERT INTO trades_v2 SELECT DISTINCT {cols} FROM trades")
+        self.con.execute("DROP TABLE trades")
+        self.con.execute("ALTER TABLE trades_v2 RENAME TO trades")
+        self.con.execute("COMMIT")
 
     def __enter__(self) -> Store:
         return self
@@ -143,7 +166,7 @@ class Store:
 
     def upsert_trades(self, trades: Iterable[Trade]) -> int:
         df = pd.DataFrame([astuple(t) for t in trades], columns=TRADE_COLS)
-        return self._upsert_frame("trades", df, ["tx_hash", "wallet", "asset", "side"])
+        return self._upsert_frame("trades", df, TRADE_KEY)
 
     def upsert_positions(self, positions: Iterable[ClosedPosition]) -> int:
         df = pd.DataFrame([astuple(p) for p in positions], columns=POSITION_COLS)
