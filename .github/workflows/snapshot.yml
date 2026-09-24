@@ -1,0 +1,68 @@
+name: snapshot
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      skip_batch:
+        description: "Only rebuild and deploy the dashboard"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ["web/**"]
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Restore research database
+        if: github.event_name != 'push' && !inputs.skip_batch
+        uses: actions/cache/restore@v4
+        with:
+          path: data/research.duckdb
+          key: research-${{ github.run_id }}
+          restore-keys: research-
+      - name: Run batch
+        if: github.event_name != 'push' && !inputs.skip_batch
+        run: |
+          uv sync --locked
+          uv run whalescan batch
+      - name: Save research database
+        if: always() && github.event_name != 'push' && !inputs.skip_batch
+        uses: actions/cache/save@v4
+        with:
+          path: data/research.duckdb
+          key: research-${{ github.run_id }}
+      - name: Commit snapshot
+        if: github.event_name != 'push' && !inputs.skip_batch
+        run: |
+          git config user.name "whalescan-bot"
+          git config user.email "whalescan-bot@users.noreply.github.com"
+          git add data/snapshot
+          git diff --cached --quiet || (git commit -m "snapshot: $(date -u +%FT%H:%MZ)" && git push)
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - name: Build dashboard
+        working-directory: web
+        run: npm ci && npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: web/dist }
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
