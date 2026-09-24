@@ -114,7 +114,7 @@ td.num, th.num { text-align: right; }
 .truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gate-fail { color: var(--dim); text-transform: uppercase; }
 .area-contacts td, .area-dossier td { white-space: nowrap; }
-.area-contacts td.truncate { max-width: 240px; }
+.area-contacts td.truncate { max-width: 200px; }
 
 .chart { height: 240px; }
 .ladder { display: grid; gap: 2px; margin-top: 12px; }

@@ -322,3 +322,16 @@ def test_cli_live_starts_the_station(monkeypatch):
     monkeypatch.setattr(cli, "Station", FakeStation)
     assert cli.main(["live", "--port", "9999"]) == 0
     assert seen["addr"] == ("127.0.0.1", 9999)
+
+
+def test_cli_live_ctrl_c_is_a_clean_exit(monkeypatch, capsys):
+    class InterruptedStation:
+        def __init__(self, cfg):
+            pass
+
+        async def run(self, host, port):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "Station", InterruptedStation)
+    assert cli.main(["live"]) == 0
+    assert "stopped" in capsys.readouterr().out

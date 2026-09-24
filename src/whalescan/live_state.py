@@ -97,6 +97,7 @@ class LiveState:
         horizon = now - int(self.g.signal_lookback_h * 3600)
         recent = sorted((e for e in self.events.values()
                          if e.side == "BUY" and e.last_ts >= horizon
+                         and not self._closed(e)  # resolved markets have no order book (CLOB 404)
                          and self.scores.certified(e.wallet, self._category(e))),
                         key=lambda e: -e.last_ts)
         out: list[str] = []
@@ -114,6 +115,10 @@ class LiveState:
         return {"signals": signals, "contacts": contacts}
 
     # ---------------------------------------------------------------- internals
+
+    def _closed(self, ev: PositionEvent) -> bool:
+        m = self.markets.get(ev.condition_id)
+        return m is not None and m.closed
 
     def _category(self, ev: PositionEvent) -> str:
         return GateContext(self.g, self.cfg.categories, self.blocklist, self.scores, self.markets, (), None).category(

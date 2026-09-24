@@ -62,7 +62,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.cmd == "live":
             print(f"WHALESCAN live -> http://{args.host}:{args.port}  (Ctrl-C to stop)")
-            asyncio.run(Station(cfg).run(args.host, args.port))
+            try:
+                asyncio.run(Station(cfg).run(args.host, args.port))
+            except KeyboardInterrupt:  # uvicorn re-raises Ctrl-C after its own clean shutdown
+                pass
+            print("WHALESCAN live stopped")
             return 0
         if args.cmd == "score":
             report = asyncio.run(run_batch(cfg, stop_after_scoring=True))

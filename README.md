@@ -39,6 +39,21 @@ cd web && npm install && npm run dev      # dashboard on http://localhost:5173
 
 Tests: `uv run pytest` · `scripts/test-cpp.sh` · `cd web && npm test`.
 
+### Live mode
+
+```bash
+uv run whalescan score --max-wallets 300   # once: produces data/scores.parquet (certified whales)
+(cd web && npm run build)                  # once: the station serves the built dashboard
+uv run whalescan live                      # http://127.0.0.1:8765 — Ctrl-C to stop
+```
+
+The station subscribes to Polymarket's trade firehose (RTDS WebSocket) and to the order books of every market a
+certified whale bought in the last 24 h (CLOB WebSocket), gates each trade the moment it prints, and pushes
+contacts, signals and book updates to the dashboard over its own WebSocket. Books are kept honest against the
+server's own best bid/ask on every update and re-snapshotted over REST when they disagree. A signal whose live
+cost-to-follow runs past its max entry turns **STALE**. Measured: ~1,100 book messages/s for 200 tokens, feed
+latency ~0.3–0.4 s.
+
 If GitHub's runners are ever blocked by Polymarket, run `uv run whalescan batch --publish` locally: it
 commits and pushes the snapshot, and the Pages workflow deploys it.
 

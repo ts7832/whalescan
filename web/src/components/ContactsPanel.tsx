@@ -23,9 +23,9 @@ export function ContactsPanel({ contacts, now, onWallet }: { contacts: Signal[];
                   <td>{c.side} {c.outcome.toUpperCase()}</td>
                   <td className="num">{fmtUsd(c.usdc)}</td>
                   <td className="num">{fmtPrice(c.price)}</td>
-                  <td className="gate-fail">
+                  <td className="gate-fail" title={fail ? `${fail.code} ${fail.detail}` : c.status}>
                     <span className={c.status === 'CONFLICT' ? 'red' : c.status === 'EXIT' ? 'cyan' : ''}>{c.status}</span>
-                    {fail && c.status === 'REJECTED' && <> · {fail.code} {fail.detail}</>}
+                    {fail && c.status === 'REJECTED' && <> · {fail.code}</>}
                   </td>
                 </tr>
               );

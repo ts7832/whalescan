@@ -129,3 +129,11 @@ def test_new_scores_reevaluate_open_events():
     s.on_trade(trade(wallet="0xnobody"), NOW)
     promoted = pd.DataFrame([score("0xnobody", "ALL", True), score("0xnobody", "POLITICS", True)], columns=SCORE_COLUMNS)
     assert ("signal", "SIGNAL") in kinds(s.set_scores(promoted, NOW))
+
+
+def test_resolved_markets_are_not_watched():
+    closed = Market("0xc", "Who wins?", "who-wins", "us-election", NOW - H, True, NOW - H, (1.0, 0.0),
+                    ("yes", "no"), False, 0.0, 1.0, 1e6, ("Politics",))
+    s = LiveState(CFG, scores=SCORES, markets={"0xc": closed})
+    s.on_trade(trade(), NOW)
+    assert s.watch_set(NOW) == []
