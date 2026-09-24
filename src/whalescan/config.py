@@ -87,6 +87,11 @@ class SniperCfg:
 
 
 @dataclass(frozen=True)
+class SweepCfg:
+    fill_min_usdc: float
+
+
+@dataclass(frozen=True)
 class InsiderCfg:
     max_age_days: float
     tier_a_age_days: float
@@ -133,6 +138,7 @@ class Config:
     scoring: ScoringCfg
     gate: GateCfg
     sniper: SniperCfg
+    sweep: SweepCfg
     insider: InsiderCfg
     validation: ValidationCfg
     blocklist: BlocklistCfg
@@ -168,6 +174,7 @@ def load_config(path: Path | None = None) -> Config:
         scoring=_section(ScoringCfg, "scoring", raw["scoring"]),
         gate=_section(GateCfg, "gate", raw["gate"]),
         sniper=_section(SniperCfg, "sniper", raw["sniper"]),
+        sweep=_section(SweepCfg, "sweep", raw["sweep"]),
         insider=_section(InsiderCfg, "insider", raw["insider"]),
         validation=_section(ValidationCfg, "validation", raw["validation"]),
         blocklist=_section(BlocklistCfg, "blocklist", raw["blocklist"]),

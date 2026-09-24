@@ -30,8 +30,8 @@ export const fmtUtc = (ts: number): string => `${new Date(ts * 1000).toISOString
 export const fmtDate = (ts: number | null | undefined): string =>
   ts ? new Date(ts * 1000).toISOString().slice(0, 10) : '—';
 
-/** A snapshot is stale when the 6-hourly job has missed at least one run. */
-export const isSnapshotStale = (meta: Meta, now: number, maxAgeH = 8): boolean => now - meta.generated_at > maxAgeH * 3600;
+/** Alerts are refreshed every 15 minutes; an hour without a sweep means something is wrong. */
+export const isSnapshotStale = (meta: Meta, now: number, maxAgeH = 1): boolean => now - meta.generated_at > maxAgeH * 3600;
 
 /** "FRESH WALLET · 1.2D OLD · 2 MARKETS" from the insider rule details (I2 age, I3 breadth). */
 export function insiderBadge(s: Signal): string {

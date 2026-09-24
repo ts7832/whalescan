@@ -1,0 +1,54 @@
+name: insider-sweep
+# WHALESCAN's primary loop: every 15 minutes, read every >= $1k fill across Polymarket since the previous
+# sweep, look up the account age of new big news-market bettors, and redeploy the dashboard's alerts.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: insider-sweep
+  cancel-in-progress: false
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { enable-cache: true }
+      - name: Restore sweep window
+        uses: actions/cache/restore@v4
+        with:
+          path: data/sweep.duckdb
+          key: sweep-${{ github.run_id }}
+          restore-keys: sweep-
+      - name: Sweep
+        run: |
+          uv sync --locked
+          uv run whalescan sweep
+      - name: Save sweep window
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/sweep.duckdb
+          key: sweep-${{ github.run_id }}
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - name: Build dashboard
+        working-directory: web
+        run: npm ci && npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: web/dist }
+  deploy:
+    needs: sweep
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

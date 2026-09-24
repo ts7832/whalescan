@@ -263,6 +263,13 @@ class Store:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         return self.con.execute(f"SELECT {', '.join(TRADE_COLS)} FROM trades {where} ORDER BY ts", params).df()
 
+    def latest_trade_ts(self) -> int | None:
+        row = self.con.execute("SELECT max(ts) FROM trades").fetchone()
+        return _opt_int(row[0]) if row else None
+
+    def prune_trades(self, before_ts: int) -> None:
+        self.con.execute("DELETE FROM trades WHERE ts < ?", [before_ts])
+
     def large_buy_trades(self, min_usdc: float) -> pd.DataFrame:
         """BUY fills of every (wallet, asset) position that adds up to at least `min_usdc`."""
         cols = ", ".join(f"t.{c}" for c in TRADE_COLS)

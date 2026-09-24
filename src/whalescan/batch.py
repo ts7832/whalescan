@@ -175,6 +175,14 @@ async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFr
         store.upsert_trades(page.trades)
     await refresh_markets(apis, store, now)
 
+    return await evaluate_window(apis, store, cfg, book, blocklist, now, since)
+
+
+async def evaluate_window(apis: Apis, store: Store, cfg: Config, book: ScoreBook, blocklist: Blocklist, now: int,
+                          since: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Gate every position event in the stored trades since `since`: snipers via G1–G7, everyone else via the
+    insider rules. Shared by the daily batch and the 15-minute sweep."""
+    g = cfg.gate
     events = aggregate(trades_from_frame(store.trades_frame(since_ts=since)), g.aggregation_window_s)
     markets = store.markets_by_id({e.condition_id for e in events})
     ctx = GateContext(cfg=g, categories=cfg.categories, blocklist=blocklist, scores=book, markets=markets,
@@ -364,6 +372,7 @@ async def run_batch(cfg: Config, *, apis: Apis | None = None, now: int | None = 
 
             names = {w: s.name for w, s in store.wallet_state().items()}
             out = cfg.path(cfg.paths.snapshot_dir)
+            write_parquet_atomic(scores, out / "scores.parquet")  # read by the 15-minute sweep
             write_json_atomic(out / "signals.json", signals)
             write_json_atomic(out / "contacts.json", contacts)
             write_json_atomic(out / "whales.json", whales_json(scores, eligible, names,

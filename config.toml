@@ -72,6 +72,11 @@ min_win_rate = 0.80
 min_median_stake = 5000
 max_p_value = 0.01
 
+[sweep]
+# The 15-minute insider sweep reads every fill of at least this size across Polymarket and adds fills up
+# per wallet, so an insider splitting $20k into small pieces is still caught (~950 such fills per hour).
+fill_min_usdc = 1000
+
 [insider]
 # Fresh-wallet insider pattern: no history needed (see Plan 2 addendum for the evidence).
 max_age_days = 7

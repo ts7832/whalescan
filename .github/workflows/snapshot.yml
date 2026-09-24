@@ -1,7 +1,7 @@
 name: snapshot
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 3 * * *"   # daily: wallet histories, sniper scores, backtests (alerts come from insider-sweep)
   workflow_dispatch:
     inputs:
       skip_batch:

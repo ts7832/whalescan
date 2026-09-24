@@ -49,10 +49,10 @@ describe('dates and staleness', () => {
     expect(fmtDate(86400)).toBe('1970-01-02');
   });
 
-  it('flags a snapshot older than 8 hours as stale', () => {
+  it('flags alerts older than an hour as stale', () => {
     const m = meta(1);
-    expect(isSnapshotStale({ ...m, generated_at: 0 }, 8 * 3600)).toBe(false);
-    expect(isSnapshotStale({ ...m, generated_at: 0 }, 8 * 3600 + 1)).toBe(true);
+    expect(isSnapshotStale({ ...m, generated_at: 0 }, 3600)).toBe(false);
+    expect(isSnapshotStale({ ...m, generated_at: 0 }, 3601)).toBe(true);
   });
 });
 

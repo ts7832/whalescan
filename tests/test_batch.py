@@ -367,3 +367,16 @@ async def test_known_snipers_are_not_rejudged_as_insiders(tmp_path):
     await run(tmp_path, (positions, markets, trades), skip_validation=True)
     whale_contacts = [c for c in read(tmp_path, "contacts.json") if c["wallet"] == "0xwhale"]
     assert whale_contacts and all(c["kind"] == "SKILL" for c in whale_contacts)
+
+
+def test_cli_sweep_runs_the_insider_sweep(monkeypatch, capsys):
+    seen = {}
+
+    async def fake_sweep(cfg, **kwargs):
+        from whalescan.sweep import SweepReport
+        seen.update(kwargs)
+        return SweepReport(fills=12, signals=1, insiders=1, contacts=3)
+
+    monkeypatch.setattr(cli, "run_sweep", fake_sweep)
+    assert cli.main(["sweep", "--publish"]) == 0
+    assert seen == {"publish": True} and "1 insider" in capsys.readouterr().out

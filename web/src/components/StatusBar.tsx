@@ -18,7 +18,7 @@ export function StatusBar({ meta, now, linkUp }: { meta: Meta; now: number; link
             <span>BOOKS <b>{meta.watching ?? 0}</b></span>
           </>
         ) : (
-          <span className={`badge ${age > 8 * 3600 ? 'warn' : 'ok'}`}>
+          <span className={`badge ${age > 3600 ? 'warn' : 'ok'}`}>
             ● {meta.mode} · {fmtUtc(meta.generated_at)} · {fmtAge(age)} AGO
           </span>
         )}
