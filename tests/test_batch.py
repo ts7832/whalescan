@@ -306,3 +306,18 @@ def test_watchlist_requires_enough_evidence():
                            dict(row, wallet="0xsolid", n_eff=60.0, p_value=0.2)], columns=SCORE_COLUMNS)
     out = whales_json(scores, pd.DataFrame(columns=ELIGIBLE_COLUMNS), {}, min_n_eff=20)
     assert [w["wallet"] for w in out] == ["0xsolid"]
+
+
+def test_cli_live_starts_the_station(monkeypatch):
+    seen = {}
+
+    class FakeStation:
+        def __init__(self, cfg):
+            seen["cfg"] = cfg
+
+        async def run(self, host, port):
+            seen["addr"] = (host, port)
+
+    monkeypatch.setattr(cli, "Station", FakeStation)
+    assert cli.main(["live", "--port", "9999"]) == 0
+    assert seen["addr"] == ("127.0.0.1", 9999)

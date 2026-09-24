@@ -14,6 +14,7 @@ import pandas as pd
 from whalescan.api.http import BlockedError
 from whalescan.batch import BatchReport, run_batch
 from whalescan.config import load_config
+from whalescan.live import Station
 from whalescan.store import LockedError
 
 
@@ -46,6 +47,9 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--skip-validation", action="store_true")
             p.add_argument("--force-validation", action="store_true")
             p.add_argument("--publish", action="store_true", help="git commit + push data/snapshot afterwards")
+    live = sub.add_parser("live", help="real-time station + dashboard on http://127.0.0.1:8765")
+    live.add_argument("--host", default="127.0.0.1")
+    live.add_argument("--port", type=int, default=8765)
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
@@ -53,9 +57,13 @@ def main(argv: list[str] | None = None) -> int:
     # httpx logs every request at INFO; a full batch makes tens of thousands of them.
     logging.getLogger("httpx").setLevel(logging.DEBUG if args.verbose else logging.WARNING)
     cfg = load_config(args.config)
-    if args.max_wallets:
+    if getattr(args, "max_wallets", None):
         cfg = replace(cfg, universe=replace(cfg.universe, max_wallets=args.max_wallets))
     try:
+        if args.cmd == "live":
+            print(f"WHALESCAN live -> http://{args.host}:{args.port}  (Ctrl-C to stop)")
+            asyncio.run(Station(cfg).run(args.host, args.port))
+            return 0
         if args.cmd == "score":
             report = asyncio.run(run_batch(cfg, stop_after_scoring=True))
             print(format_table(report.top))
