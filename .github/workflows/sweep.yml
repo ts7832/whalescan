@@ -3,7 +3,8 @@ name: insider-sweep
 # sweep, look up the account age of new big news-market bettors, and redeploy the dashboard's alerts.
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    # Off-peak minutes: GitHub delays or drops scheduled runs at :00/:15/:30/:45, when everyone's cron fires.
+    - cron: "4,19,34,49 * * * *"
   workflow_dispatch:
 permissions:
   contents: read
