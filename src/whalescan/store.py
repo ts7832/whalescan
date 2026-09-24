@@ -263,6 +263,15 @@ class Store:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         return self.con.execute(f"SELECT {', '.join(TRADE_COLS)} FROM trades {where} ORDER BY ts", params).df()
 
+    def large_buy_trades(self, min_usdc: float) -> pd.DataFrame:
+        """BUY fills of every (wallet, asset) position that adds up to at least `min_usdc`."""
+        cols = ", ".join(f"t.{c}" for c in TRADE_COLS)
+        return self.con.execute(
+            f"""WITH big AS (SELECT wallet, asset FROM trades WHERE side = 'BUY'
+                             GROUP BY wallet, asset HAVING sum(price * size) >= ?)
+                SELECT {cols} FROM trades t JOIN big USING (wallet, asset) WHERE t.side = 'BUY' ORDER BY t.ts""",
+            [min_usdc]).df()
+
     def markets_by_id(self, ids: Iterable[str] | None = None) -> dict[str, Market]:
         sql = f"SELECT {', '.join(MARKET_COLS)} FROM markets"
         params: list[Any] = []

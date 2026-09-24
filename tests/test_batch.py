@@ -43,6 +43,9 @@ class FakeData:
         rows = [p for p in self.positions.get(wallet, []) if since_ts is None or p.ts >= since_ts]
         return PositionHistory(rows, True, truncated=wallet in self.truncated and since_ts is None)
 
+    async def markets_traded(self, wallet):
+        return 1 if wallet.startswith("0xfresh") else 500
+
     async def trades(self, *, user=None, min_usdc=None, since_ts=None):
         rows = [t for t in self.rows if (user is None or t.wallet == user)
                 and (since_ts is None or t.ts >= since_ts) and (min_usdc is None or t.usdc >= min_usdc)]
@@ -55,6 +58,9 @@ class FakeGamma:
 
     async def markets(self, ids):
         return {i: self.m[i] for i in ids if i in self.m}
+
+    async def created_ts(self, wallet):
+        return NOW - DAY if wallet.startswith("0xfresh") else NOW - 400 * DAY
 
 
 class FakeClob:
@@ -337,3 +343,18 @@ def test_cli_live_ctrl_c_is_a_clean_exit(monkeypatch, capsys):
     monkeypatch.setattr(cli, "Station", InterruptedStation)
     assert cli.main(["live"]) == 0
     assert "stopped" in capsys.readouterr().out
+
+
+
+async def test_fresh_wallet_big_news_bet_is_an_insider_alert_listed_first(tmp_path):
+    positions, markets, trades = world()
+    trades.append(Trade("0xins", NOW - 1800, "0xfresh1", "live-yes", "0xlive", "BUY", 0.40, 100_000.0, "it-happens",
+                        "Will it happen?", "Yes", 0, None))
+    await run(tmp_path, (positions, markets, trades), skip_validation=True)
+    signals = read(tmp_path, "signals.json")
+    assert [s["kind"] for s in signals][:1] == ["INSIDER"]
+    ins = signals[0]
+    assert ins["wallet"] == "0xfresh1" and ins["tier"] == "A" and ins["status"] == "INSIDER"
+    assert {c["code"] for c in ins["checks"]} == {f"I{i}" for i in range(1, 7)}
+    assert any(s["kind"] == "SKILL" for s in signals)          # the certified whale (certified mode in tests)
+    assert read(tmp_path, "meta.json")["counts"]["insiders"] == 1

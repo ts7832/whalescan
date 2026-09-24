@@ -84,6 +84,34 @@ def run_validation(eligible: pd.DataFrame, flags: pd.Series, trades: list[Trade]
     return _report(rows, fold_rows, cfg, now)
 
 
+def insider_backtest(trades: list[Trade], markets: Mapping[str, Market], profiles: Mapping[str, Any],
+                     cfg: Config, blocklist: Blocklist) -> dict[str, Any]:
+    """Would following fresh-account big news bets have paid? Rules I1, I2, I4, I5 and the price band, applied at
+    the time of each bet. I3 (markets traded) is skipped: only today's count is known, which would leak the future."""
+    from whalescan.classify import category_for_tags
+    from whalescan.insider import account_age_days
+
+    ic, v, g = cfg.insider, cfg.validation, cfg.gate
+    rets, wins = [], []
+    for ev in aggregate(trades, g.aggregation_window_s):
+        m = markets.get(ev.condition_id)
+        winner = m.winner_index() if m else None
+        if m is None or winner is None or ev.side != "BUY" or ev.usdc < ic.min_usdc:
+            continue
+        if category_for_tags(m.tags, cfg.categories) not in ic.categories:
+            continue
+        if blocklist.blocked(event_slug=m.event_slug or ev.event_slug, slug=m.slug, volume=m.volume):
+            continue
+        age = account_age_days(ev, profiles.get(ev.wallet))
+        if age is None or age > ic.max_age_days or not (ic.price_min <= ev.price <= ic.price_max):
+            continue
+        won = 1.0 if ev.outcome_index == winner else 0.0
+        follow = min(0.99, ev.price + v.slippage)
+        rets.append(won - follow - m.fee_per_share(follow))
+        wins.append(won)
+    return _stats(np.array(rets, dtype=float))
+
+
 def _report(rows: list[dict[str, Any]], fold_rows: list[dict[str, Any]], cfg: Config, now: int) -> dict[str, Any]:
     v = cfg.validation
     df = pd.DataFrame(rows, columns=["group", "ret", "predicted", "won"])

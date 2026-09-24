@@ -22,12 +22,14 @@ from whalescan.api.http import ApiError, BlockedError, HttpClient
 from whalescan.book import follow_quote
 from whalescan.classify import Blocklist, wallet_flags
 from whalescan.config import ROOT, Config
+from whalescan.api.profiles import fetch_profile
 from whalescan.gate import GateContext, ScoreBook, aggregate, evaluate, needs_book
+from whalescan.insider import evaluate_insider, is_insider_candidate, needs_insider_book
 from whalescan.parsers import ParseError
 from whalescan.scoring import apply_history_window, prepare_positions, score_wallets
 from whalescan.snapshot import evaluation_json, whales_json, write_json_atomic, write_parquet_atomic
 from whalescan.store import Store, trades_from_frame
-from whalescan.validate import run_validation
+from whalescan.validate import insider_backtest, run_validation
 
 log = logging.getLogger(__name__)
 MARKET_MAX_AGE_S = 3600
@@ -52,6 +54,7 @@ class BatchReport:
     testable: int = 0
     certified_wallets: int = 0
     signals: int = 0
+    insiders: int = 0
     contacts: int = 0
     api_errors: int = 0
     validation_ran: bool = False
@@ -183,16 +186,54 @@ async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFr
             if snap is not None:
                 evaluations[i] = evaluate(e.event, ctx, follow_quote(snap, g.follow_size_usdc))
 
+    evaluations = await _apply_insider_detector(apis, store, cfg, evaluations, markets, blocklist, now)
+
     names = {w: s.name for w, s in store.wallet_state().items()}
     signals = []
-    for e in sorted((e for e in evaluations if e.status == "SIGNAL"),
-                    key=lambda e: (e.tier or "Z", -(e.net_edge or 0.0))):
+    # Insider alerts first (WHALESCAN's primary signal), then snipers; best tier first within each.
+    for e in sorted((e for e in evaluations if e.status in ("SIGNAL", "INSIDER")),
+                    key=lambda e: (e.status != "INSIDER", e.tier or "Z", -(e.net_edge or 0.0), -e.event.usdc)):
         history = await _guarded(apis.clob.price_history(e.event.asset), f"history {e.event.asset}")
         signals.append(evaluation_json(e, markets.get(e.event.condition_id), names, history))
     contacts = [evaluation_json(e, markets.get(e.event.condition_id), names, None)
                 for e in sorted(evaluations, key=lambda e: -e.event.last_ts)
-                if e.status != "SIGNAL" and e.event.usdc >= g.min_usdc][:g.max_contacts]
+                if e.status not in ("SIGNAL", "INSIDER") and e.event.usdc >= g.min_usdc][:g.max_contacts]
     return signals, contacts
+
+
+async def _profiles(apis: Apis, store: Store, cfg: Config, wallets: set[str], now: int) -> dict[str, Any]:
+    stale = store.stale_profiles(wallets, now=now, ttl_s=int(cfg.insider.profile_ttl_h * 3600))
+    sem = asyncio.Semaphore(cfg.http.concurrency)
+
+    async def one(w: str) -> Any:
+        async with sem:
+            return await _guarded(fetch_profile(apis.gamma, apis.data, w, now=now), f"profile {w}")
+
+    store.upsert_profiles(p for p in await asyncio.gather(*(one(w) for w in sorted(stale))) if p is not None)
+    return store.profiles(wallets)
+
+
+async def _apply_insider_detector(apis: Apis, store: Store, cfg: Config, evaluations: list[Any],
+                                  markets: Mapping[str, Any], blocklist: Blocklist, now: int) -> list[Any]:
+    """Large news-market buys by wallets that aren't proven snipers: judge them as possible insiders instead."""
+    ic = cfg.insider
+    cands = [i for i, e in enumerate(evaluations)
+             if e.status != "SIGNAL" and is_insider_candidate(e.event, e.category, ic)]
+    if not cands:
+        return evaluations
+    profiles = await _profiles(apis, store, cfg, {evaluations[i].event.wallet for i in cands}, now)
+    out = list(evaluations)
+    for i in cands:
+        e = evaluations[i]
+        m = markets.get(e.event.condition_id)
+        ie = evaluate_insider(e.event, profiles.get(e.event.wallet), m, e.category, ic, blocklist, e.quote, now)
+        if needs_insider_book(ie):
+            snap = await _guarded(apis.clob.book(e.event.asset), f"book {e.event.asset}")
+            if snap is not None:
+                ie = evaluate_insider(e.event, profiles.get(e.event.wallet), m, e.category, ic, blocklist,
+                                      follow_quote(snap, cfg.gate.follow_size_usdc), now)
+        out[i] = ie
+    return out
 
 
 async def maybe_validate(apis: Apis, store: Store, cfg: Config, eligible: pd.DataFrame, flags: pd.Series,
@@ -216,6 +257,22 @@ async def maybe_validate(apis: Apis, store: Store, cfg: Config, eligible: pd.Dat
     trades = trades_from_frame(store.trades_frame(wallets=wallets))
     markets = store.markets_by_id({t.condition_id for t in trades})
     report = run_validation(eligible, flags, trades, markets, cfg, blocklist, now=now)
+
+    # Insider backtest: every large buy we have on record (global feed + wallet histories), fresh accounts only.
+    big = trades_from_frame(store.large_buy_trades(cfg.insider.min_usdc))
+    await refresh_markets(apis, store, now)
+    big_markets = store.markets_by_id({t.condition_id for t in big})
+    from whalescan.classify import category_for_tags
+    news_wallets = {t.wallet for t in big if (m := big_markets.get(t.condition_id)) is not None
+                    and category_for_tags(m.tags, cfg.categories) in cfg.insider.categories}
+    profiles = await _profiles(apis, store, cfg, news_wallets, now)
+    report["groups"]["INSIDER"] = insider_backtest(big, big_markets, profiles, cfg, blocklist)
+    n_ins = report["groups"]["INSIDER"]["n"]
+    t_ins = report["groups"]["INSIDER"]["t_stat"]
+    report["insider_verdict"] = ("INSUFFICIENT DATA" if n_ins < cfg.validation.min_signals
+                                 else "EDGE CONFIRMED" if t_ins is not None and t_ins >= 2.0 else "EDGE NOT CONFIRMED")
+    report["caveats"].append("Insider backtest skips the markets-traded rule (only today's count is known) and "
+                             "uses the account creation time from the public profile.")
     store.set_meta("validation_at", str(now))
     return report
 
@@ -229,7 +286,7 @@ def _meta_json(cfg: Config, report: BatchReport, now: int, validation_at: str | 
         "counts": {
             "wallets_scanned": report.wallets_scanned, "wallets_complete": report.wallets_complete,
             "tests": report.tests, "testable": report.testable, "certified_wallets": report.certified_wallets,
-            "signals": report.signals, "contacts": report.contacts,
+            "signals": report.signals, "insiders": report.insiders, "contacts": report.contacts,
         },
         "params": {
             "bh_q": cfg.scoring.bh_q, "min_usdc": g.min_usdc, "conviction_k": g.conviction_k,
@@ -296,6 +353,7 @@ async def run_batch(cfg: Config, *, apis: Apis | None = None, now: int | None = 
                                                   force=force_validation)
                 report.validation_ran = validation is not None
             report.signals, report.contacts = len(signals), len(contacts)
+            report.insiders = sum(1 for s in signals if s["kind"] == "INSIDER")
             report.api_errors = failures + (http.errors if http else 0) + apis.skipped()
 
             names = {w: s.name for w, s in store.wallet_state().items()}

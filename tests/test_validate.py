@@ -69,3 +69,27 @@ def test_skilled_world_confirms_edge_out_of_sample():
     assert report["groups"]["BASELINE"]["n"] == 5 * 10 + 60 * 2
     assert report["groups"]["BASELINE"]["mean_ret"] < sig["mean_ret"]
     assert sum(b["n"] for b in report["calibration"]) == sig["n"]
+
+
+
+def test_insider_backtest_scores_fresh_news_bets_only():
+    from whalescan.models import WalletProfile
+    from whalescan.validate import insider_backtest
+
+    trades, markets, profiles = [], {}, {}
+    def add(i, wallet, created_days_before, won, tags=("Politics",), usdc=30_000.0):
+        cid = f"c{i}"
+        ts = 100 * DAY + i
+        trades.append(Trade(f"0x{i}", ts, wallet, f"{cid}-y", cid, "BUY", 0.30, usdc / 0.30, "ev", "t", "Yes", 0, None))
+        markets[cid] = Market(cid, "q", "s", "ev", ts + DAY, True, ts + DAY, (1.0, 0.0) if won else (0.0, 1.0),
+                              (f"{cid}-y", f"{cid}-n"), False, 0.0, 1.0, 1e6, tags)
+        profiles[wallet] = WalletProfile(wallet, ts - int(created_days_before * DAY), 1, 0)
+    add(1, "0xa", 1, True)
+    add(2, "0xb", 2, True)
+    add(3, "0xc", 3, False)
+    add(4, "0xold", 300, False)                      # not fresh
+    add(5, "0xsport", 1, False, tags=("Sports",))    # not a news market
+    add(6, "0xsmall", 1, False, usdc=1_000.0)        # too small
+    out = insider_backtest(trades, markets, profiles, CFG, Blocklist(CFG.blocklist))
+    assert out["n"] == 3 and abs(out["hit_rate"] - 2 / 3) < 1e-12
+    assert abs(out["mean_ret"] - ((1 - 0.315) * 2 + (0 - 0.315)) / 3) < 1e-9

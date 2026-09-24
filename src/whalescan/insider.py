@@ -26,6 +26,11 @@ def is_insider_candidate(ev: PositionEvent, category: str, cfg: InsiderCfg) -> b
     return ev.side == "BUY" and ev.usdc >= cfg.min_usdc and category in cfg.categories
 
 
+def needs_insider_book(e: Evaluation) -> bool:
+    failed = e.failed()
+    return len(failed) == 1 and failed[0].code == "I6" and failed[0].detail == "NO BOOK"
+
+
 def account_age_days(ev: PositionEvent, profile: WalletProfile | None) -> float | None:
     if profile is None or profile.created_ts is None:
         return None

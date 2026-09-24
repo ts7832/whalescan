@@ -57,6 +57,7 @@ def evaluation_json(e: Evaluation, market: Market | None, names: Mapping[str, st
     ev, q = e.event, e.quote
     return {
         "id": ev.id,
+        "kind": "INSIDER" if e.checks and e.checks[0].code == "I1" else "SKILL",
         "status": e.status,
         "tier": e.tier,
         "category": e.category,
