@@ -222,7 +222,7 @@ async def run_batch(cfg: Config, *, apis: Apis | None = None, now: int | None = 
     http: HttpClient | None = None
     if apis is None:
         http = HttpClient(user_agent=cfg.http.user_agent, rate_per_s=cfg.http.rate_per_s,
-                          max_retries=cfg.http.max_retries)
+                          max_retries=cfg.http.max_retries, host_rates=cfg.http.host_rates)
         apis = Apis(DataApi(http), GammaApi(http), ClobApi(http))
     report = BatchReport()
     blocklist = Blocklist(cfg.blocklist)

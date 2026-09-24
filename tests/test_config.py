@@ -10,6 +10,8 @@ def test_loads_repo_config():
     assert cfg.scoring.bh_q == 0.10
     assert cfg.gate.min_usdc == 5000
     assert cfg.http.user_agent.startswith("whalescan/")
+    assert cfg.http.host_rates["data-api.polymarket.com"] == 10.0
+    assert cfg.http.host_rates["gamma-api.polymarket.com"] == 20.0
     assert set(cfg.categories.order) <= set(cfg.categories.tags)
     assert all(t == t.lower() for tags in cfg.categories.tags.values() for t in tags)
 

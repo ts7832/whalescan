@@ -104,29 +104,30 @@ async def test_leaderboard_pages():
     assert len(board) == 100 and board[0].rank == 1
 
 
-async def test_gamma_queries_closed_and_open_in_chunks():
+async def test_gamma_queries_closed_first_then_open_for_the_rest():
     calls = []
 
     def handler(request):
         ids = request.url.params.get_list("condition_ids")
         closed = request.url.params["closed"]
-        calls.append((len(ids), closed, request.url.params["include_tag"]))
+        calls.append((len(ids), closed, request.url.params["include_tag"], request.url.params["limit"]))
         rows = [{"conditionId": i.upper(), "closed": closed == "true", "outcomePrices": "[\"1\",\"0\"]"}
                 for i in ids if (int(i[2:]) % 2 == 0) == (closed == "true")]
         return httpx.Response(200, json=rows)
 
-    ids = [f"0x{i}" for i in range(85)]
+    ids = [f"0x{i}" for i in range(250)]
     markets = await GammaApi(http(handler)).markets(ids + ["0X1"])
-    assert len(markets) == 85
+    assert len(markets) == 250
     assert markets["0x2"].closed and not markets["0x3"].closed
-    assert sorted(calls) == sorted([(40, "true", "true"), (40, "false", "true"), (40, "true", "true"),
-                                    (40, "false", "true"), (5, "true", "true"), (5, "false", "true")])
+    # 250 ids -> closed pass in chunks of 100; the 125 odd (open) ids left -> open pass in chunks of 100
+    assert calls == [(100, "true", "true", "100"), (100, "true", "true", "100"), (50, "true", "true", "100"),
+                     (100, "false", "true", "100"), (25, "false", "true", "100")]
 
 
 async def test_gamma_skips_malformed_rows():
     api = GammaApi(http(lambda r: httpx.Response(200, json=[{"question": "no id"}])))
     assert await api.markets(["0x1"]) == {}
-    assert api.skipped == 2
+    assert api.skipped == 2  # one malformed row from the closed pass, one from the open pass
 
 
 async def test_clob_book_and_history():

@@ -9,7 +9,7 @@ from whalescan.models import Market
 from whalescan.parsers import parse_many, parse_market
 
 GAMMA_API = "https://gamma-api.polymarket.com"
-CHUNK = 40  # condition ids per request; keeps URLs ~3 KB and under the 100-row cap
+CHUNK = 100  # Gamma's maximum number of condition_ids per request (422 above it)
 
 
 class GammaApi:
@@ -18,16 +18,20 @@ class GammaApi:
         self.skipped = 0
 
     async def markets(self, condition_ids: Iterable[str]) -> dict[str, Market]:
-        ids = sorted({c.lower() for c in condition_ids})
+        """Metadata for the given markets. Gamma hides closed markets unless asked, so query closed
+        markets first (almost all historical positions) and only the remainder as open."""
         out: dict[str, Market] = {}
-        for i in range(0, len(ids), CHUNK):
-            chunk = ids[i:i + CHUNK]
-            for closed in ("true", "false"):  # Gamma hides closed markets unless asked explicitly
+        remaining = sorted({c.lower() for c in condition_ids})
+        for closed in ("true", "false"):
+            for i in range(0, len(remaining), CHUNK):
+                chunk = remaining[i:i + CHUNK]
                 rows = await self._http.get_json(
                     f"{GAMMA_API}/markets",
-                    [("condition_ids", c) for c in chunk] + [("closed", closed), ("include_tag", "true"), ("limit", 100)],
+                    [("condition_ids", c) for c in chunk] + [("closed", closed), ("include_tag", "true"),
+                                                             ("limit", CHUNK)],
                 )
                 markets, skipped = parse_many(rows, parse_market)
                 self.skipped += skipped
                 out.update((m.condition_id, m) for m in markets)
+            remaining = [c for c in remaining if c not in out]
         return out

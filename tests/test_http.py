@@ -111,3 +111,22 @@ async def test_token_bucket_waits_when_empty():
     await bucket.acquire()
     await bucket.acquire()
     assert sleeps == [pytest.approx(0.5)]
+
+
+async def test_each_host_gets_its_own_rate_limit():
+    now = {"t": 0.0}
+    sleeps = []
+
+    async def sleep(s):
+        sleeps.append(s)
+        now["t"] += s
+
+    c = HttpClient(user_agent="t", rate_per_s=1.0, max_retries=0, sleep=sleep, clock=lambda: now["t"],
+                   host_rates={"fast.test": 4.0},
+                   transport=httpx.MockTransport(lambda r: httpx.Response(200, json=1)))
+    for _ in range(4):
+        await c.get_json("https://fast.test/x")   # burst 4 at 4/s: no waiting
+    assert sleeps == []
+    await c.get_json("https://slow.test/x")       # default bucket, burst 1: first call free
+    await c.get_json("https://slow.test/x")       # second call waits 1 s at 1/s
+    assert sleeps == [pytest.approx(1.0)]

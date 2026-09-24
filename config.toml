@@ -8,8 +8,14 @@ snapshot_dir = "data/snapshot"
 [http]
 rate_per_s = 5.0
 max_retries = 5
-concurrency = 8
+concurrency = 16
 user_agent = "whalescan/0.1 (+https://github.com/whalescan)"
+
+# Measured 2026-09-24: Data API returns 429 above ~12 req/s sustained; Gamma served 20 req/s cleanly.
+[http.host_rates]
+"data-api.polymarket.com" = 10.0
+"gamma-api.polymarket.com" = 20.0
+"clob.polymarket.com" = 10.0
 
 [universe]
 max_wallets = 3000

@@ -24,6 +24,7 @@ class HttpCfg:
     max_retries: int
     concurrency: int
     user_agent: str
+    host_rates: dict[str, float]
 
 
 @dataclass(frozen=True)

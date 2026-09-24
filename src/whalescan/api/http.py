@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -66,7 +67,8 @@ def _retry_after(r: httpx.Response) -> float | None:
 class HttpClient:
     def __init__(self, *, user_agent: str, rate_per_s: float, max_retries: int,
                  transport: httpx.AsyncBaseTransport | None = None, sleep: Sleep = asyncio.sleep,
-                 backoff_s: float = 0.5, timeout_s: float = 30.0) -> None:
+                 backoff_s: float = 0.5, timeout_s: float = 30.0, clock: Callable[[], float] = time.monotonic,
+                 host_rates: Mapping[str, float] | None = None) -> None:
         self._client = httpx.AsyncClient(
             http2=transport is None,
             transport=transport,
@@ -74,7 +76,12 @@ class HttpClient:
             follow_redirects=True,
             headers={"User-Agent": user_agent, "Accept": "application/json"},
         )
-        self._bucket = TokenBucket(rate_per_s, burst=max(1, int(rate_per_s)), sleep=sleep)
+        # Polymarket limits each API host separately (measured: Data API ~10/s, Gamma >= 20/s),
+        # so every host gets its own bucket; hosts not listed use rate_per_s.
+        self._default_rate = rate_per_s
+        self._host_rates = dict(host_rates or {})
+        self._buckets: dict[str, TokenBucket] = {}
+        self._clock = clock
         self._max_retries = max_retries
         self._sleep = sleep
         self._backoff = backoff_s
@@ -82,8 +89,9 @@ class HttpClient:
 
     async def get_json(self, url: str, params: Params = ()) -> Any:
         last = ""
+        bucket = self._bucket_for(url)
         for attempt in range(self._max_retries + 1):
-            await self._bucket.acquire()
+            await bucket.acquire()
             wait: float | None = None
             try:
                 r = await self._client.get(url, params=list(params))
@@ -110,6 +118,13 @@ class HttpClient:
                 log.info("retrying %s in %.1fs (%s)", url, delay, last)
                 await self._sleep(delay)
         raise ApiError(f"giving up on {url} after {self._max_retries + 1} attempts: {last}")
+
+    def _bucket_for(self, url: str) -> TokenBucket:
+        host = urlsplit(url).hostname or ""
+        if host not in self._buckets:
+            rate = self._host_rates.get(host, self._default_rate)
+            self._buckets[host] = TokenBucket(rate, burst=max(1, int(rate)), clock=self._clock, sleep=self._sleep)
+        return self._buckets[host]
 
     async def aclose(self) -> None:
         await self._client.aclose()
