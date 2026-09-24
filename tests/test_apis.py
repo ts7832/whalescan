@@ -1,10 +1,11 @@
 import httpx
+import pytest
 
 from whalescan.api import data_api as data_api_module
 from whalescan.api.clob import ClobApi
 from whalescan.api.data_api import DataApi
 from whalescan.api.gamma import GammaApi
-from whalescan.api.http import HttpClient
+from whalescan.api.http import ApiError, HttpClient
 
 
 async def _noop(_):
@@ -60,9 +61,16 @@ async def test_closed_positions_refused_on_first_page_is_incomplete():
     assert not hist.complete and not hist.truncated and hist.positions == []
 
 
-async def test_closed_positions_error_object_with_200_marks_incomplete():
-    hist = await DataApi(http(lambda r: httpx.Response(200, json={"error": "nope"}))).closed_positions("0xw")
-    assert not hist.complete and hist.positions == []
+async def test_closed_positions_error_object_raises_instead_of_truncating():
+    # Only the explicit offset-cap 400 means "history ends here". Any other error body must fail the
+    # fetch, so nothing partial is stored and the next run retries in full.
+    def handler(request):
+        if int(request.url.params["offset"]) >= 50:
+            return httpx.Response(200, json={"error": "temporary"})
+        return httpx.Response(200, json=[pos(k, 5000 - k) for k in range(50)])
+
+    with pytest.raises(ApiError, match="error object"):
+        await DataApi(http(handler)).closed_positions("0xw")
 
 
 async def test_closed_positions_stops_at_local_offset_cap(monkeypatch):
@@ -164,3 +172,29 @@ async def test_redeemable_positions_returns_only_resolved_rows_across_pages():
     assert len(hist.positions) == 250 + 2
     assert all(p.ts == 0 for p in hist.positions)
     assert seen == [("/positions", "0xw", "0", 0), ("/positions", "0xw", "0", 500)]
+
+
+async def test_truncated_redeemable_positions_are_incomplete():
+    # /positions has no known outcome-neutral order, so a depth-capped fetch is not a trustworthy window.
+    def handler(request):
+        if int(request.url.params["offset"]) >= 500:
+            return httpx.Response(400, json={"error": "max historical trades offset of 10000 exceeded"})
+        return httpx.Response(200, json=[dict(pos(k, 0), redeemable=True, curPrice=0) for k in range(500)])
+
+    hist = await DataApi(http(handler)).redeemable_positions("0xw")
+    assert not hist.complete
+
+
+async def test_gamma_failed_chunk_does_not_lose_the_others():
+    def handler(request):
+        ids = request.url.params.get_list("condition_ids")
+        if "0x0" in ids and request.url.params["closed"] == "true":
+            return httpx.Response(500)
+        if request.url.params["closed"] == "false":
+            return httpx.Response(200, json={"error": "not a list"})
+        return httpx.Response(200, json=[{"conditionId": i, "closed": True, "outcomePrices": "[\"1\",\"0\"]"} for i in ids])
+
+    api = GammaApi(http(handler))
+    markets = await api.markets([f"0x{i}" for i in range(150)])
+    assert len(markets) == 50 and "0x0" not in markets and "0x99" in markets  # ids sort as text
+    assert api.skipped >= 1

@@ -33,7 +33,7 @@ export function ValidationPanel({ validation }: { validation: Validation | null 
       <div className={`verdict ${cls}`}>{validation.verdict}</div>
       <table>
         <thead>
-          <tr><th>GROUP</th><th className="num">N</th><th className="num">RET/$</th><th className="num">HIT</th><th className="num">T</th></tr>
+          <tr><th>GROUP</th><th className="num">N</th><th className="num" title="Mean return per share bought, in cents">RET/SH</th><th className="num">HIT</th><th className="num">T</th></tr>
         </thead>
         <tbody>
           {rows.map(([label, g]) => (

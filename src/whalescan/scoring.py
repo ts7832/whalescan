@@ -18,13 +18,28 @@ SCORE_COLUMNS = ["wallet", "category", "n", "n_eff", "edge", "sigma", "post_edge
                  "certified", "flags", "median_stake", "as_of"]
 
 
+def apply_history_window(frame: pd.DataFrame) -> pd.DataFrame:
+    """Drop positions in markets that closed before a wallet's history window starts.
+
+    A depth-capped /closed-positions fetch only covers the most recent window, while unredeemed
+    positions come from the wallet's whole life (mostly losers). Mixing them would bias the wallet
+    downward, so both sources are cut to the same window. Unknown close time is kept.
+    """
+    if frame.empty or "history_start_ts" not in frame:
+        return frame
+    start = frame["history_start_ts"]
+    keep = start.isna() | frame["closed_ts"].isna() | (frame["closed_ts"] >= start)
+    return frame[keep.astype(bool)]
+
+
 def prepare_positions(frame: pd.DataFrame, scoring: ScoringCfg, categories: CategoriesCfg,
                       blocklist: Blocklist) -> pd.DataFrame:
     """Resolved, complete-history, in-band, non-blocklisted positions with winsorized stakes."""
     empty = pd.DataFrame(columns=ELIGIBLE_COLUMNS)
     if frame.empty:
         return empty
-    df = frame[frame["winner_index"].notna() & frame["complete"].astype(bool)]
+    df = apply_history_window(frame)
+    df = df[df["winner_index"].notna() & df["complete"].astype(bool)]
     df = df[(df["avg_price"] >= scoring.price_min) & (df["avg_price"] <= scoring.price_max) & (df["total_bought"] > 0)]
     if df.empty:
         return empty

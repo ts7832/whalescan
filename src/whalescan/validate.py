@@ -121,5 +121,8 @@ def _report(rows: list[dict[str, Any]], fold_rows: list[dict[str, Any]], cfg: Co
             "which wallets are studied.",
             "Positions exited before resolution are scored as if held to resolution from the average entry price.",
             f"Follow cost is modelled as whale price + {v.slippage:.3f}; historical order books were not recorded.",
+            "Wallet behaviour flags and stake winsorization use each wallet's full history, not only the "
+            "training slice of each fold.",
+            "Returns are per share bought (payout minus price paid), not per dollar.",
         ],
     }

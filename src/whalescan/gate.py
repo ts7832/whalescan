@@ -166,6 +166,9 @@ def evaluate(ev: PositionEvent, ctx: GateContext, quote: FollowQuote | None) -> 
     window = g.conflict_window_h * 3600
 
     def certified_buy_nearby(o: PositionEvent) -> bool:
+        # Historical evaluation may only see what existed at decision time: no later events.
+        if ctx.historical and o.first_ts > ev.first_ts:
+            return False
         return (o.side == "BUY" and abs(o.first_ts - ev.first_ts) <= window
                 and ctx.scores.certified(o.wallet, category))
 

@@ -25,7 +25,7 @@ def test_no_data_is_insufficient():
                             Blocklist(CFG.blocklist), now=0)
     assert report["verdict"] == "INSUFFICIENT DATA"
     assert report["groups"]["SIGNALS"]["n"] == 0
-    assert len(report["caveats"]) == 3
+    assert len(report["caveats"]) == 5
 
 
 def build_world(seed=3):

@@ -49,7 +49,11 @@ jobs:
           git config user.name "whalescan-bot"
           git config user.email "whalescan-bot@users.noreply.github.com"
           git add data/snapshot
-          git diff --cached --quiet || (git commit -m "snapshot: $(date -u +%FT%H:%MZ)" && git push)
+          git diff --cached --quiet && exit 0
+          git commit -m "snapshot: $(date -u +%FT%H:%MZ)"
+          # main may have moved during a multi-hour run: rebase onto it and retry the push
+          for i in 1 2 3; do git pull --rebase origin main && git push && exit 0; sleep 10; done
+          exit 1
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
       - name: Build dashboard

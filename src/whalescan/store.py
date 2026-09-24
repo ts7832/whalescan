@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS markets (
   fee_rate DOUBLE, fee_exponent DOUBLE, volume DOUBLE, tags VARCHAR[], fetched_at BIGINT);
 CREATE TABLE IF NOT EXISTS wallets (
   wallet VARCHAR PRIMARY KEY, fetched_at BIGINT, complete BOOLEAN, source VARCHAR, name VARCHAR);
+ALTER TABLE wallets ADD COLUMN IF NOT EXISTS history_start_ts BIGINT;
 CREATE TABLE IF NOT EXISTS wallet_scores (
   wallet VARCHAR, category VARCHAR, n INTEGER, n_eff DOUBLE, edge DOUBLE, sigma DOUBLE, post_edge DOUBLE,
   p_value DOUBLE, bh_pass BOOLEAN, certified BOOLEAN, flags VARCHAR, median_stake DOUBLE, as_of BIGINT,
@@ -163,6 +164,10 @@ class Store:
                complete = excluded.complete, source = excluded.source""",
             [wallet, fetched_at, complete, source])
 
+    def set_history_start(self, wallet: str, ts: int | None) -> None:
+        """Start of a depth-capped history window (None = full history). Scoring ignores earlier markets."""
+        self.con.execute("UPDATE wallets SET history_start_ts = ? WHERE wallet = ?", [ts, wallet])
+
     def set_wallet_names(self, names: Mapping[str, str]) -> None:
         rows = [(w, n) for w, n in names.items() if n]
         if rows:
@@ -189,7 +194,8 @@ class Store:
             """SELECT p.wallet, p.asset, p.condition_id, p.avg_price, p.total_bought, p.realized_pnl, p.outcome,
                       p.outcome_index, p.title, p.ts, p.event_slug, m.slug AS market_slug,
                       m.event_slug AS market_event_slug, COALESCE(m.closed, FALSE) AS closed, m.closed_ts,
-                      m.volume, m.tags, m.outcome_prices, COALESCE(w.complete, FALSE) AS complete
+                      m.volume, m.tags, m.outcome_prices, COALESCE(w.complete, FALSE) AS complete,
+                      w.history_start_ts
                FROM positions p
                LEFT JOIN markets m USING (condition_id)
                LEFT JOIN wallets w USING (wallet)""").df()

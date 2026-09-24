@@ -23,7 +23,8 @@ from whalescan.book import follow_quote
 from whalescan.classify import Blocklist, wallet_flags
 from whalescan.config import ROOT, Config
 from whalescan.gate import GateContext, ScoreBook, aggregate, evaluate, needs_book
-from whalescan.scoring import prepare_positions, score_wallets
+from whalescan.parsers import ParseError
+from whalescan.scoring import apply_history_window, prepare_positions, score_wallets
 from whalescan.snapshot import evaluation_json, whales_json, write_json_atomic, write_parquet_atomic
 from whalescan.store import Store, trades_from_frame
 from whalescan.validate import run_validation
@@ -63,7 +64,7 @@ async def _guarded(coro: Any, what: str) -> Any:
         return await coro
     except BlockedError:
         raise
-    except ApiError as e:
+    except (ApiError, ParseError) as e:
         log.warning("%s failed: %s", what, e)
         return None
 
@@ -113,6 +114,9 @@ async def refresh_positions(apis: Apis, store: Store, wallets: Mapping[str, str]
         store.upsert_positions(hist.positions)
         store.record_wallet_fetch(wallet, fetched_at=now, complete=hist.complete and open_hist.complete,
                                   source=source)
+        if since is None:  # full fetch: (re)define the history window; incremental runs keep it
+            start = min((p.ts for p in hist.positions), default=None) if hist.truncated else None
+            store.set_history_start(wallet, start)
         done += 1
         if done % step == 0 or done == len(wallets):
             log.info("positions: %d/%d wallets", done, len(wallets))
@@ -249,7 +253,7 @@ async def run_batch(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             complete = frame[frame["complete"].astype(bool)]
             report.wallets_complete = int(complete["wallet"].nunique())
             eligible = prepare_positions(frame, cfg.scoring, cfg.categories, blocklist)
-            flags = wallet_flags(complete[FLAG_COLUMNS], cfg.scoring)
+            flags = wallet_flags(apply_history_window(complete)[FLAG_COLUMNS], cfg.scoring)
             scores = score_wallets(eligible, flags, cfg.scoring, as_of=now)
             store.replace_scores(scores)
             write_parquet_atomic(scores, cfg.path(cfg.paths.scores_parquet))

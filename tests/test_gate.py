@@ -168,3 +168,15 @@ def test_historical_mode_uses_event_time_and_ignores_closure():
 def test_gate_thresholds_come_from_config():
     strict = replace(CFG.gate, min_net_edge=0.5)
     assert evaluate(event(), ctx(gate=strict), quote()).status == "REJECTED"
+
+
+def test_historical_mode_ignores_events_from_the_future():
+    scores = book(*CERTIFIED, score("0xbear", "ALL", True), score("0xbear", "POLITICS", True),
+                  score("0xbull", "ALL", True), score("0xbull", "POLITICS", True))
+    later_bear = event(wallet="0xbear", asset="no", price=0.6, ts=NOW + H)
+    later_bull = event(wallet="0xbull", ts=NOW + 2 * H)
+    ev = event(ts=NOW)
+    hist = evaluate(ev, ctx(scores=scores, events=[later_bear, later_bull], now=None, historical=True), quote())
+    assert hist.status == "SIGNAL" and hist.consensus == ("0xwhale",)
+    earlier_bear = event(wallet="0xbear", asset="no", price=0.6, ts=NOW - H)
+    assert evaluate(ev, ctx(scores=scores, events=[earlier_bear], now=None, historical=True), quote()).status == "CONFLICT"

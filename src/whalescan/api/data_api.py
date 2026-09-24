@@ -42,16 +42,18 @@ class DataApi:
         self.skipped = 0
 
     async def _page(self, path: str, params: Params) -> list[dict[str, Any]] | None:
-        """One page of rows, or None when the API refuses to paginate deeper (offset cap)."""
+        """One page of rows, or None when the API refuses to paginate deeper (offset cap).
+
+        Any other error body raises: treating it as "end of history" would store a silently
+        truncated or holed history that incremental refreshes never repair."""
         try:
             data = await self._http.get_json(f"{DATA_API}{path}", params)
         except ApiError as e:
             if e.status == 400 and "offset" in e.body.lower():
                 return None
             raise
-        if isinstance(data, dict):
-            log.warning("error object from %s: %s", path, str(data)[:200])
-            return None
+        if not isinstance(data, list):
+            raise ApiError(f"error object from {path}: {str(data)[:200]}", status=200, body=str(data)[:500])
         return data
 
     async def closed_positions(self, wallet: str, *, since_ts: int | None = None) -> PositionHistory:
@@ -97,15 +99,15 @@ class DataApi:
         while offset <= MAX_OFFSET:
             rows = await self._page("/positions", [("user", wallet), ("sizeThreshold", 0), ("limit", OPEN_PAGE),
                                                    ("offset", offset)])
-            if rows is None:
-                return PositionHistory(out, offset > 0, truncated=offset > 0)
+            if rows is None:  # unknown row order: a capped fetch is not a trustworthy window
+                return PositionHistory(out, False)
             batch, skipped = parse_many([r for r in rows if r.get("redeemable")], parse_open_position)
             self.skipped += skipped
             out.extend(batch)
             if len(rows) < OPEN_PAGE:
                 return PositionHistory(out, True)
             offset += OPEN_PAGE
-        return PositionHistory(out, True, truncated=True)
+        return PositionHistory(out, False)
 
     async def trades(self, *, user: str | None = None, min_usdc: float | None = None,
                      since_ts: int | None = None) -> TradePage:

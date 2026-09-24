@@ -24,9 +24,10 @@ def config(tmp):
 
 
 class FakeData:
-    def __init__(self, positions, trades, *, block=False, redeemable=None):
+    def __init__(self, positions, trades, *, block=False, redeemable=None, truncated=()):
         self.positions, self.rows, self.block, self.skipped = positions, trades, block, 0
         self.redeemable = redeemable or {}
+        self.truncated = set(truncated)
 
     async def redeemable_positions(self, wallet):
         return PositionHistory(self.redeemable.get(wallet, []), True)
@@ -38,7 +39,7 @@ class FakeData:
 
     async def closed_positions(self, wallet, *, since_ts=None):
         rows = [p for p in self.positions.get(wallet, []) if since_ts is None or p.ts >= since_ts]
-        return PositionHistory(rows, True)
+        return PositionHistory(rows, True, truncated=wallet in self.truncated and since_ts is None)
 
     async def trades(self, *, user=None, min_usdc=None, since_ts=None):
         rows = [t for t in self.rows if (user is None or t.wallet == user)
@@ -94,9 +95,10 @@ def world(skilled=True, seed=5):
     return positions, markets, trades
 
 
-async def run(tmp, w, block=False, redeemable=None, **kw):
+async def run(tmp, w, block=False, redeemable=None, truncated=(), **kw):
     positions, markets, trades = w
-    apis = Apis(FakeData(positions, trades, block=block, redeemable=redeemable), FakeGamma(markets), FakeClob())
+    apis = Apis(FakeData(positions, trades, block=block, redeemable=redeemable, truncated=truncated),
+                FakeGamma(markets), FakeClob())
     return await run_batch(config(tmp), apis=apis, now=NOW, **kw)
 
 
@@ -233,3 +235,34 @@ async def test_unredeemed_losers_are_scored_so_winner_only_histories_do_not_cert
     assert report.certified_wallets == 1  # the genuinely skilled whale only
     scores = {w["wallet"]: w for w in read(tmp_path, "whales.json")}
     assert "0xfaker" not in scores or not scores["0xfaker"]["certified"]
+
+
+async def test_truncated_history_windows_both_sources(tmp_path):
+    # The whale's /closed-positions was depth-capped (recent window only). Its ancient unredeemed losers,
+    # resolved long before that window starts, must not be mixed in — that would bias it downward.
+    positions, markets, trades = world()
+    old_losers = []
+    for i in range(400):
+        cid = f"0xwhale-old{i}"
+        markets[cid] = Market(cid, "old", f"slug-{cid}", f"ev-{cid}", NOW - 400 * DAY, True, NOW - 400 * DAY,
+                              (0.0, 1.0), (f"{cid}-y", f"{cid}-n"), False, 0.0, 1.0, 1e6, ("Politics",))
+        old_losers.append(ClosedPosition("0xwhale", f"{cid}-y", cid, 0.5, 2000.0, 0.0, 0.0, "Yes", 0, "old", "ev", 0))
+    for _ in range(2):  # second run is incremental and must keep the window
+        report = await run(tmp_path, (positions, markets, trades), redeemable={"0xwhale": old_losers},
+                           truncated={"0xwhale"}, skip_validation=True)
+        assert report.certified_wallets == 1
+
+
+async def test_guarded_swallows_parse_errors_but_not_blocks():
+    from whalescan.batch import _guarded
+    from whalescan.parsers import ParseError
+
+    async def bad_payload():
+        raise ParseError("price history", {"error": "x"}, KeyError("history"))
+
+    async def blocked():
+        raise BlockedError("BLOCKED")
+
+    assert await _guarded(bad_payload(), "history") is None
+    with pytest.raises(BlockedError):
+        await _guarded(blocked(), "x")

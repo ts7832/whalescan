@@ -157,3 +157,8 @@ def test_unredeemed_open_position_parses_as_resolved_history_row():
     p = parse_open_position(row)
     assert (p.wallet, p.condition_id, p.cur_price, p.total_bought) == ("0xd38b", "0xab", 0.0, 410900.73)
     assert p.ts == 0  # no close time exists; 0 keeps it out of incremental max(ts)
+
+
+def test_non_dict_row_is_a_parse_error():
+    with pytest.raises(ParseError):
+        parse_market("conditionId")

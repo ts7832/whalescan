@@ -54,7 +54,7 @@ def _guard(kind: str, fn: Callable[[dict[str, Any]], T]) -> Callable[[dict[str, 
     def wrapped(d: dict[str, Any]) -> T:
         try:
             return fn(d)
-        except (KeyError, TypeError, ValueError) as e:
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
             raise ParseError(kind, d, e) from e
 
     return wrapped
