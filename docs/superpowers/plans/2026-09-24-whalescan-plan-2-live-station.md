@@ -29,8 +29,8 @@ one whole-branch review at the end.
 2. **One C++ call per message:** `OrderBook.apply_deltas(sides: u8[n], prices: f64[n], sizes: f64[n])`.
    Off-grid prices (not within 1e-6 ticks of the 0.0001 grid) raise `ValueError` → resnapshot.
 3. **Watch set** = assets of BUY position events by certified wallets in the last 24h ∪ assets with open signals,
-   capped at 200 (most recent first). A change is debounced 5 s, then the CLOB socket reconnects with the new set
-   (simplest correct resubscribe; the new `book` snapshots re-seed every book).
+   capped at 200 (open signals first). Changes are applied with incremental `{"assets_ids":[…],"operation":
+   "subscribe"|"unsubscribe"}` messages on the open socket (verified live 2026-09-24); a reconnect re-sends the full set.
 4. **Station state is pure and testable.** `LiveState` owns aggregation, gating, watch set, STALE re-evaluation and
    message production; it never touches the network. The runner (`live.py`) wires sockets, REST, the store and the
    HTTP server around it.

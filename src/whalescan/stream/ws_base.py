@@ -58,6 +58,18 @@ class ReconnectingWS:
         if self._ws is not None:
             asyncio.ensure_future(self._ws.close())
 
+    async def send(self, msg: str) -> bool:
+        """Send on the open connection. False when there is none; the next (re)connect's
+        subscription then carries the full state, so nothing is lost."""
+        ws = self._ws
+        if ws is None:
+            return False
+        try:
+            await ws.send(msg)
+            return True
+        except (OSError, WebSocketException):
+            return False
+
     def reconnect_now(self) -> None:
         """Drop the current connection and reconnect immediately (e.g. the subscription set changed)."""
         self._skip_backoff = True

@@ -54,9 +54,14 @@ class FakeSocket:
         self.reconnects = 0
         self.connects = 1
         self.messages = 0
+        self.sent = []
 
     def reconnect_now(self):
         self.reconnects += 1
+
+    async def send(self, msg):
+        self.sent.append(json.loads(msg))
+        return True
 
 
 def rtds_frame(wallet="0xWHALE", usdc=10_000.0, price=0.40, tx="0xt1", side="BUY"):
@@ -80,8 +85,9 @@ async def test_trade_flows_to_signal_through_maintenance(tmp_path):
     await s.handle_rtds(rtds_frame())
     assert s.feed_latency_ms == 1000
     await s.tick()                     # fetch unknown market, react to watch-set change
-    assert gamma.asked == [{"0xc"}] and s.clob_socket.reconnects == 1
-    s.apply_subscription()             # the (fake) CLOB socket resubscribed; its book snapshot arrives:
+    assert gamma.asked == [{"0xc"}] and s.clob_socket.reconnects == 0
+    assert s.clob_socket.sent == [{"assets_ids": ["yes"], "operation": "subscribe"}]
+    # the server answers an incremental subscribe with the book snapshot:
     await s.handle_clob(json.dumps({"event_type": "book", "asset_id": "yes", "timestamp": str(NOW * 1000),
                                     "bids": [{"price": "0.39", "size": "5000"}], "asks": [{"price": "0.41", "size": "100000"}]}))
     types = [(m["type"], m["data"].get("status")) for m in got if m["type"] in ("contact", "signal")]
@@ -130,8 +136,7 @@ def signal_frame(tx="0xt1"):
 
 async def _open_signal(s):
     await s.handle_rtds(signal_frame())
-    await s.tick()          # market fetched; watch set applied; subscription pending
-    s.apply_subscription()  # the CLOB socket (fake) reconnected with the new set
+    await s.tick()          # market fetched; watch set applied via an incremental subscribe
     await s.handle_clob(json.dumps({"event_type": "book", "asset_id": "yes", "timestamp": str(NOW * 1000),
                                     "bids": [{"price": "0.39", "size": "5000"}], "asks": [{"price": "0.41", "size": "100000"}]}))
 
@@ -151,16 +156,18 @@ async def test_book_pushes_are_coalesced_and_the_last_state_is_flushed(tmp_path)
     assert len(books) == 1 and books[0]["data"]["quote"]["best_bid"] == 0.396
 
 
-async def test_watch_changes_are_debounced(tmp_path):
+async def test_watch_changes_are_incremental_subscribe_and_unsubscribe(tmp_path):
     s, gamma, clob = station(tmp_path)
     await s.handle_rtds(signal_frame())
     await s.tick()
     await s.handle_rtds(rtds_frame(tx="0xt2", wallet="0xwhale", price=0.4).replace('"asset": "yes"', '"asset": "other"'))
     await s.tick()
-    assert s.clob_socket.reconnects == 1       # second change waits for the debounce window
-    s.clock = lambda: NOW + 31
+    assert s.clob_socket.sent[-1] == {"assets_ids": ["other"], "operation": "subscribe"}
+    assert "other" in s.state.books.subscribed and s.clob_socket.reconnects == 0
+    s.clock = lambda: NOW + 25 * 3600          # everything expires -> unsubscribe both
     await s.tick()
-    assert s.clob_socket.reconnects == 2
+    assert s.clob_socket.sent[-1] == {"assets_ids": ["other", "yes"], "operation": "unsubscribe"}
+    assert s.state.books.subscribed == set()
 
 
 async def test_clob_link_down_disables_quotes(tmp_path):
@@ -190,3 +197,29 @@ def test_websocket_rejects_foreign_origins():
                 ws.receive_json()
         with c.websocket_connect("/ws", headers={"origin": "http://testserver"}) as ws:
             assert ws.receive_json()["type"] == "state"
+
+
+class FakeData:
+    skipped = 0
+
+    def __init__(self):
+        self.calls = []
+
+    async def trades(self, *, user=None, min_usdc=None, since_ts=None):
+        from whalescan.api.data_api import TradePage
+        from whalescan.models import Trade
+        self.calls.append(user)
+        rows = [Trade("0xw1", NOW - 100, "0xwhale", "yes", "0xc", "BUY", 0.40, 25_000.0, "us-election", "Who wins?",
+                      "Yes", 0, None)] if user in (None, "0xwhale") else []
+        return TradePage(rows, True)
+
+
+async def test_warm_up_replays_recent_trades_from_rest_and_disk(tmp_path):
+    gamma, clob, data = FakeGamma(), FakeClob(), FakeData()
+    s = Station(config(tmp_path), scores=scores(), gamma=gamma, clob=clob, data=data, clock=lambda: NOW)
+    s.clob_socket = FakeSocket()
+    await s.warm_up()
+    assert set(data.calls) == {None, "0xwhale"}
+    assert len(s.state.events) == 1                      # the same fill from both sources counts once
+    assert s.watch == ["yes"] and s.clob_socket.sent[-1]["operation"] == "subscribe"
+    s.close()

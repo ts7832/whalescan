@@ -43,7 +43,6 @@ CLOB_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 PERSIST_MIN_USDC = 1_000.0
 BOOK_PUSH_INTERVAL_S = 0.25  # dirty books are flushed to the browser at most 4 times per second
 MARKET_RETRY_S = 600
-WATCH_DEBOUNCE_S = 30        # resubscribing drops and re-sends every book: do it at most this often
 RESYNC_MIN_S, RESYNC_MAX_S = 5, 300
 LINK_DOWN_STATES = {"disconnected", "silent", "backoff", "stopped"}
 
@@ -163,7 +162,6 @@ class Station:
         self.hub = Hub(state_provider=self.snapshot_state)
         self.store = Store(cfg.path(cfg.paths.research_db).with_name("live.duckdb"))
         self.watch: list[str] = []
-        self._last_resubscribe = float("-inf")
         self._dirty_books: set[str] = set()
         self._resync_after: dict[str, tuple[float, float]] = {}  # asset -> (next attempt, current delay)
         self.clob_socket: Any = None
@@ -263,11 +261,18 @@ class Station:
                 self._emit(self.state.set_markets(found, now))
 
         watch = self.state.watch_set(now)
-        if set(watch) != set(self.watch) and now - self._last_resubscribe >= WATCH_DEBOUNCE_S:
+        added = [a for a in watch if a not in self.watch]
+        removed = sorted(set(self.watch) - set(watch))
+        if added or removed:
+            # Incremental ops on the open socket (verified live): the server sends a book snapshot for each
+            # added token and stops updates for removed ones; untouched books keep streaming.
             self.watch = watch
-            self._last_resubscribe = now
+            self.state.books.subscribe(watch)
             if self.clob_socket is not None:
-                self.clob_socket.reconnect_now()  # the new subscription re-sends a snapshot of every book
+                if added:
+                    await self.clob_socket.send(json.dumps({"assets_ids": added, "operation": "subscribe"}))
+                if removed:
+                    await self.clob_socket.send(json.dumps({"assets_ids": removed, "operation": "unsubscribe"}))
 
         if self.links.get("clob") not in LINK_DOWN_STATES:  # REST can't help while deltas are being missed
             for asset in sorted(self.state.books.desynced):
@@ -281,13 +286,14 @@ class Station:
                     self._resync_after[asset] = (now + delay, delay)
 
         if self._pending:
-            self.store.upsert_trades(self._pending)
-            self._pending = []
+            pending, self._pending = self._pending, []
+            # DuckDB work runs in a thread so the event loop keeps reading sockets meanwhile
+            await asyncio.to_thread(self.store.upsert_trades, pending)
 
         if self._scores_path.exists() and self._scores_path.stat().st_mtime != self._scores_mtime:
             self._scores_mtime = self._scores_path.stat().st_mtime
             log.info("scores changed on disk: reloading")
-            self._emit(self.state.set_scores(self._load_scores(), now))
+            self._emit(self.state.set_scores(await asyncio.to_thread(self._load_scores), now))
 
         self.hub.broadcast({"type": "status", "data": self.meta()})
 
@@ -333,10 +339,15 @@ class Station:
         page = await self._guard(self.data.trades(min_usdc=self.cfg.gate.min_usdc, since_ts=since), "backfill")
         if page is not None:
             trades += page.trades
-        for wallet in sorted(self.state.scores.certified_wallets()):
-            page = await self._guard(self.data.trades(user=wallet, since_ts=since), f"backfill {wallet}")
-            if page is not None:
-                trades += page.trades
+        sem = asyncio.Semaphore(self.cfg.http.concurrency)
+
+        async def wallet_backfill(wallet: str) -> list[Trade]:
+            async with sem:
+                page = await self._guard(self.data.trades(user=wallet, since_ts=since), f"backfill {wallet}")
+            return page.trades if page is not None else []
+
+        for batch in await asyncio.gather(*(wallet_backfill(w) for w in sorted(self.state.certified_wallets))):
+            trades += batch
         for t in sorted(trades, key=lambda t: t.ts):
             self.state.on_trade(t, now)
         log.info("warm-up: replayed %d trades, %d position events", len(trades), len(self.state.events))
@@ -351,7 +362,8 @@ class Station:
 
     def _clob_subscription(self) -> list[str]:
         self.apply_subscription()
-        return [json.dumps({"assets_ids": self.watch, "type": "market"})] if self.watch else []
+        # Always open the channel, even with no tokens yet: later incremental subscribes need it.
+        return [json.dumps({"assets_ids": self.watch, "type": "market"})]
 
     async def _book_pusher(self) -> None:
         while not self._stopping:

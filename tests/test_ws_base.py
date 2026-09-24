@@ -230,3 +230,18 @@ async def test_reconnect_now_cuts_a_backoff_short():
     c.stop()
     srv2.close()
     await asyncio.wait_for(task, 2)
+
+
+async def test_send_reaches_the_server_on_the_open_connection():
+    async def handler(ws, n, srv):
+        await recv_all(ws, srv)
+
+    async with Server(handler) as srv:
+        c = ReconnectingWS("t", srv.url, subscribe=lambda: ["SUB"], on_message=lambda raw: None, rng=lambda: 0.5)
+        task = asyncio.create_task(c.run())
+        await wait_for(lambda: "SUB" in srv.received)
+        assert await c.send("EXTRA") is True
+        await wait_for(lambda: "EXTRA" in srv.received)
+        c.stop()
+        await asyncio.wait_for(task, 2)
+    assert await c.send("LATE") is False  # no connection: caller relies on the next full subscribe
