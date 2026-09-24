@@ -19,6 +19,7 @@ from whalescan.gate import Check, Evaluation, PositionEvent
 from whalescan.models import Market, WalletProfile
 
 DAY = 86400
+CLOCK_SKEW_S = 3600  # a profile "created" slightly after the first fill is clock skew, not an anomaly
 
 
 def is_insider_candidate(ev: PositionEvent, category: str, cfg: InsiderCfg) -> bool:
@@ -31,8 +32,14 @@ def needs_insider_book(e: Evaluation) -> bool:
     return len(failed) == 1 and failed[0].code == "I6" and failed[0].detail == "NO BOOK"
 
 
+def age_is_inconsistent(ev: PositionEvent, profile: WalletProfile | None) -> bool:
+    """A fill made before the profile existed proves the wallet is older than createdAt says (e.g. an API
+    trader who set up a profile later) — it must never read as "brand new"."""
+    return profile is not None and profile.created_ts is not None and profile.created_ts > ev.first_ts + CLOCK_SKEW_S
+
+
 def account_age_days(ev: PositionEvent, profile: WalletProfile | None) -> float | None:
-    if profile is None or profile.created_ts is None:
+    if profile is None or profile.created_ts is None or age_is_inconsistent(ev, profile):
         return None
     return max(0.0, (ev.first_ts - profile.created_ts) / DAY)
 
@@ -42,8 +49,11 @@ def evaluate_insider(ev: PositionEvent, profile: WalletProfile | None, market: M
     checks = [Check("I1", ev.side == "BUY", "BUY" if ev.side == "BUY" else "SELL · EXIT")]
 
     age = account_age_days(ev, profile)
-    checks.append(Check("I2", age is not None and age <= cfg.max_age_days,
-                        "AGE UNKNOWN" if age is None else f"{age:.1f}D OLD"))
+    if age_is_inconsistent(ev, profile):
+        checks.append(Check("I2", False, "AGE INCONSISTENT"))
+    else:
+        checks.append(Check("I2", age is not None and age <= cfg.max_age_days,
+                            "AGE UNKNOWN" if age is None else f"{age:.1f}D OLD"))
 
     n_markets = profile.markets_traded if profile else None
     checks.append(Check("I3", n_markets is not None and n_markets <= cfg.max_markets,
@@ -84,5 +94,5 @@ def evaluate_insider(ev: PositionEvent, profile: WalletProfile | None, market: M
     tier = None
     if status == "INSIDER":
         tier = "A" if (age is not None and age <= cfg.tier_a_age_days and ev.usdc >= cfg.tier_a_usdc) else "B"
-    return Evaluation(ev, category, tuple(checks), status, tier, None, None, ev.price + cfg.max_slippage, fee, quote,
-                      (ev.wallet,))
+    chase_limit = min(ev.price + cfg.max_slippage, cfg.price_max)  # a limit, not an edge estimate
+    return Evaluation(ev, category, tuple(checks), status, tier, None, None, chase_limit, fee, quote, (ev.wallet,))

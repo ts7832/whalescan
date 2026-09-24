@@ -60,9 +60,9 @@ function SignalCard({ s, selected, onSelect, now }: { s: Signal; selected: boole
       </div>
       <dl className="kv">
         <dt>{insider ? 'SIZE' : 'NET EDGE'}</dt><dd className="green">{insider ? fmtUsd(s.usdc) : fmtCents(s.net_edge)}</dd>
-        <dt>MAX ENTRY</dt><dd className="amber">{fmtPrice(s.max_entry)}</dd>
+        <dt title={insider ? 'Whale price + 5¢ (capped): how far to chase, not a fair-value estimate' : 'Highest price that still leaves the required edge'}>{insider ? 'CHASE LIMIT' : 'MAX ENTRY'}</dt><dd className="amber">{fmtPrice(s.max_entry)}</dd>
         <dt>FOLLOW</dt><dd>{fmtPrice(s.quote?.vwap)}</dd>
-        <dt>WHALES</dt><dd>{s.consensus.length}</dd>
+        {insider ? <><dt>FILLS</dt><dd>{s.n_fills}</dd></> : <><dt>WHALES</dt><dd>{s.consensus.length}</dd></>}
       </dl>
       {s.status === 'STALE' && <div className="stale">STALE — LIVE PRICE PAST MAX ENTRY</div>}
       {s.book === 'RESYNC' && <div className="stale">BOOK RESYNCING — PRICE UNCONFIRMED</div>}

@@ -186,7 +186,8 @@ async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFr
             if snap is not None:
                 evaluations[i] = evaluate(e.event, ctx, follow_quote(snap, g.follow_size_usdc))
 
-    evaluations = await _apply_insider_detector(apis, store, cfg, evaluations, markets, blocklist, now)
+    evaluations = await _apply_insider_detector(apis, store, cfg, evaluations, markets, blocklist, now,
+                                                book.certified_wallets())
 
     names = {w: s.name for w, s in store.wallet_state().items()}
     signals = []
@@ -202,7 +203,8 @@ async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFr
 
 
 async def _profiles(apis: Apis, store: Store, cfg: Config, wallets: set[str], now: int) -> dict[str, Any]:
-    stale = store.stale_profiles(wallets, now=now, ttl_s=int(cfg.insider.profile_ttl_h * 3600))
+    stale = store.stale_profiles(wallets, now=now, ttl_s=int(cfg.insider.profile_ttl_h * 3600),
+                                 unknown_ttl_s=int(cfg.insider.unknown_profile_ttl_h * 3600))
     sem = asyncio.Semaphore(cfg.http.concurrency)
 
     async def one(w: str) -> Any:
@@ -214,11 +216,13 @@ async def _profiles(apis: Apis, store: Store, cfg: Config, wallets: set[str], no
 
 
 async def _apply_insider_detector(apis: Apis, store: Store, cfg: Config, evaluations: list[Any],
-                                  markets: Mapping[str, Any], blocklist: Blocklist, now: int) -> list[Any]:
+                                  markets: Mapping[str, Any], blocklist: Blocklist, now: int,
+                                  proven: set[str]) -> list[Any]:
     """Large news-market buys by wallets that aren't proven snipers: judge them as possible insiders instead."""
     ic = cfg.insider
     cands = [i for i, e in enumerate(evaluations)
-             if e.status != "SIGNAL" and is_insider_candidate(e.event, e.category, ic)]
+             if e.status != "SIGNAL" and e.event.wallet not in proven and e.event.condition_id in markets
+             and is_insider_candidate(e.event, e.category, ic)]
     if not cands:
         return evaluations
     profiles = await _profiles(apis, store, cfg, {evaluations[i].event.wallet for i in cands}, now)

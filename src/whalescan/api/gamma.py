@@ -31,7 +31,10 @@ class GammaApi:
             if e.status == 404:
                 return None
             raise
-        return iso_to_ts(data.get("createdAt")) if isinstance(data, dict) else None
+        try:
+            return iso_to_ts(data.get("createdAt")) if isinstance(data, dict) else None
+        except (TypeError, ValueError, AttributeError):  # malformed createdAt: treat as unknown, never crash
+            return None
 
     async def markets(self, condition_ids: Iterable[str]) -> dict[str, Market]:
         """Metadata for the given markets. Gamma hides closed markets unless asked, so query closed

@@ -262,7 +262,7 @@ class Station:
             if found:
                 self._emit(self.state.set_markets(found, now))
 
-        wanted_profiles = {w for w in self.state.missing_profiles()
+        wanted_profiles = {w for w in self.state.missing_profiles(now)
                            if now - self._profile_asked.get(w, -1e18) >= MARKET_RETRY_S}
         if wanted_profiles:
             self._profile_asked.update(dict.fromkeys(wanted_profiles, now))

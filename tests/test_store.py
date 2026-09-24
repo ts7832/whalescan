@@ -188,3 +188,11 @@ def test_wallet_profiles_roundtrip_and_staleness(tmp_path):
         assert got["0xa"] == WalletProfile("0xa", 100, 3, 1000) and got["0xb"].created_ts is None
         assert "0xc" not in got
         assert s.stale_profiles(["0xa", "0xb", "0xc"], now=1500, ttl_s=600) == {"0xb", "0xc"}
+
+
+def test_unknown_profiles_are_retried_less_often(tmp_path):
+    from whalescan.models import WalletProfile
+    with Store(tmp_path / "db.duckdb") as s:
+        s.upsert_profiles([WalletProfile("0xnone", None, None, 1000)])
+        assert s.stale_profiles(["0xnone"], now=1000 + 3600, ttl_s=86400, unknown_ttl_s=6 * 3600) == set()
+        assert s.stale_profiles(["0xnone"], now=1000 + 7 * 3600, ttl_s=86400, unknown_ttl_s=6 * 3600) == {"0xnone"}

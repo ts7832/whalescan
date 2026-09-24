@@ -105,7 +105,7 @@ class ScoreBook:
         if self._mode == "sniper":
             median = float(overall.median_stake)
             if self._is_sniper(overall):
-                lower = max(0.0, float(overall.edge) - 2.0 * float(overall.sigma))  # ~95% lower bound: few bets
+                lower = max(0.0, float(overall.edge) - float(overall.sigma))  # 1σ haircut: few bets, stay cautious
                 return WalletView("SNIPER", lower, float(overall.edge), float(overall.p_value), int(overall.n), median)
             return WalletView("NONE", 0.0, float(overall.edge), float(overall.p_value), int(overall.n), median)
         cat = self._rows.get((wallet, category))
@@ -208,8 +208,12 @@ def evaluate(ev: PositionEvent, ctx: GateContext, quote: FollowQuote | None) -> 
 
     median = view.median_stake if view else math.nan
     multiple = ev.usdc / median if median and median > 0 else math.nan
-    g3 = ev.usdc >= g.min_usdc and not math.isnan(multiple) and multiple >= g.conviction_k
-    checks.append(Check("G3", g3, f"${ev.usdc:,.0f} · {multiple:.1f}× MEDIAN" if view else f"${ev.usdc:,.0f}"))
+    if view is not None and view.basis == "SNIPER":
+        # snipers bet big every time: their typical bet is the signal, no multiple of their median required
+        checks.append(Check("G3", ev.usdc >= g.min_usdc, f"${ev.usdc:,.0f} · SNIPER SIZE"))
+    else:
+        g3 = ev.usdc >= g.min_usdc and not math.isnan(multiple) and multiple >= g.conviction_k
+        checks.append(Check("G3", g3, f"${ev.usdc:,.0f} · {multiple:.1f}× MEDIAN" if view else f"${ev.usdc:,.0f}"))
 
     checks.append(Check("G4", g.price_min <= ev.price <= g.price_max, f"PRICE {ev.price:.3f}"))
     checks.append(_g5(ev, market, ctx, now))

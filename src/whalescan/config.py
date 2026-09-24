@@ -98,6 +98,7 @@ class InsiderCfg:
     max_slippage: float
     categories: tuple[str, ...]
     profile_ttl_h: float
+    unknown_profile_ttl_h: float
 
 
 @dataclass(frozen=True)

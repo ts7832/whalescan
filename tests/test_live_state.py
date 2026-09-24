@@ -236,3 +236,15 @@ def test_insider_goes_stale_when_the_price_runs_away():
     s.books.on_changes(PriceChanges(NOW * 1000 + 1, ("yes", "yes"), (1, 1), (0.41, 0.50), (0.0, 100_000.0),
                                     (0.39, 0.39), (None, 0.50)))
     assert [(m["type"], m["data"]["status"]) for m in s.on_book("yes", NOW)] == [("signal_update", "STALE")]
+
+
+def test_profiles_are_refreshed_after_their_ttl_and_unknown_ages_retried():
+    from whalescan.models import WalletProfile
+    s = state()
+    seed_book(s)
+    s.on_trade(trade(wallet="0xfresh", usdc=30_000.0), NOW)
+    s.set_profiles({"0xfresh": WalletProfile("0xfresh", None, None, NOW)}, NOW)   # profile not found yet
+    assert s.missing_profiles(now=NOW + 7 * 3600) == {"0xfresh"}                  # unknown: retry after hours
+    s.set_profiles({"0xfresh": fresh()}, NOW)
+    assert s.missing_profiles(now=NOW + 3600) == set()
+    assert s.missing_profiles(now=NOW + 25 * 3600) == {"0xfresh"}                 # known: refresh after ttl

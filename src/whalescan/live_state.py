@@ -151,12 +151,22 @@ class LiveState:
         return {self.events[i].asset for i in self.signals if i in self.events}
 
     def _insider_candidate(self, ev: PositionEvent) -> bool:
-        return (ev.wallet not in self._certified
+        return (ev.wallet not in self._certified and ev.condition_id in self.markets  # category must be known
                 and is_insider_candidate(ev, self._category(ev), self.cfg.insider) and not self._closed(ev))
 
-    def missing_profiles(self) -> set[str]:
-        """Wallets whose account age decides whether a big bet is an insider alert."""
-        return {e.wallet for e in self.events.values() if self._insider_candidate(e)} - self.profiles.keys()
+    def missing_profiles(self, now: int | None = None) -> set[str]:
+        """Candidate wallets whose profile is missing or expired (unknown ages are retried sooner)."""
+        ic = self.cfg.insider
+        out = set()
+        for w in {e.wallet for e in self.events.values() if self._insider_candidate(e)}:
+            p = self.profiles.get(w)
+            if p is None:
+                out.add(w)
+            elif now is not None:
+                ttl = ic.profile_ttl_h if p.created_ts is not None else ic.unknown_profile_ttl_h
+                if now - p.fetched_at > ttl * 3600:
+                    out.add(w)
+        return out
 
     def missing_markets(self) -> set[str]:
         return {e.condition_id for e in self.events.values()} - self.markets.keys()

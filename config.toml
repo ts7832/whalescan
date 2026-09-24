@@ -82,8 +82,10 @@ tier_a_usdc = 25000
 price_min = 0.02
 price_max = 0.90
 max_slippage = 0.05
-categories = ["POLITICS", "GEOPOLITICS", "ECONOMY", "TECH", "CULTURE", "OTHER"]
+# OTHER is excluded on purpose: untagged or unknown markets are often sports the tag list misses.
+categories = ["POLITICS", "GEOPOLITICS", "ECONOMY", "TECH", "CULTURE"]
 profile_ttl_h = 24
+unknown_profile_ttl_h = 6
 
 [validation]
 fold_days = 14

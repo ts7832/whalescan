@@ -195,7 +195,7 @@ def sniper_book(**overrides):
 def test_rare_big_winner_is_a_sniper_with_a_conservative_edge():
     v = sniper_book().view("0xsniper", "POLITICS")
     assert v.basis == "SNIPER"
-    assert abs(v.post_edge - (0.40 - 2 * 0.12)) < 1e-12        # lower ~95% bound, not the raw edge
+    assert abs(v.post_edge - (0.40 - 0.12)) < 1e-12            # 1σ haircut, not the raw edge
     assert sniper_book().certified_wallets() == {"0xsniper"}
 
 
@@ -214,3 +214,11 @@ def test_high_frequency_certified_wallet_is_not_a_signal_in_sniper_mode():
     book_ = ScoreBook(pd.DataFrame([row, score("0xquant", "POLITICS", True)], columns=SCORE_COLUMNS),
                       CFG.gate.fallback_max_cat_positions, mode="sniper", sniper=CFG.sniper)
     assert book_.view("0xquant", "POLITICS").basis == "NONE"
+
+
+def test_snipers_are_not_held_to_the_median_multiple_and_use_a_one_sigma_bound():
+    book_ = sniper_book(median_stake=8000.0, edge=0.30, sigma=0.08)
+    ctx_ = ctx(scores=book_, gate=replace(CFG.gate, skill_mode="sniper"))
+    e = evaluate(event(wallet="0xsniper", usdc=8_000.0), ctx_, quote())
+    assert e.status == "SIGNAL", e.checks                              # a typical-size sniper bet passes G3
+    assert abs(e.post_edge - (0.30 - 0.08)) < 1e-12

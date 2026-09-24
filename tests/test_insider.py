@@ -83,3 +83,23 @@ def test_candidate_prefilter_needs_no_profile():
     assert not is_insider_candidate(ev(usdc=5_000), "POLITICS", CFG.insider)
     assert not is_insider_candidate(ev(), "SPORTS", CFG.insider)
     assert not is_insider_candidate(ev(side="SELL"), "POLITICS", CFG.insider)
+
+
+# ---------------------------------------------------------------- review fixes
+
+def test_profile_created_after_the_first_bet_is_inconsistent_not_brand_new():
+    late_profile = WalletProfile("0xnew", NOW - H + 3 * D, 2, NOW)   # "created" 3 days after it bet
+    r = run(p=late_profile)
+    assert r.checks[1].detail == "AGE INCONSISTENT" and r.status == "REJECTED"
+    tolerant = WalletProfile("0xnew", NOW - H + 60, 2, NOW)          # a minute of clock skew is fine
+    assert run(p=tolerant).checks[1].passed
+
+
+def test_insider_card_limit_is_capped_by_the_price_band():
+    r = run(e=ev(price=0.88), quote=q(vwap=0.885))
+    assert r.max_entry == CFG.insider.price_max
+
+
+def test_unknown_category_is_not_news():
+    assert "OTHER" not in CFG.insider.categories
+    assert not is_insider_candidate(ev(), "OTHER", CFG.insider)

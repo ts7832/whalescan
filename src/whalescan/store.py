@@ -311,10 +311,13 @@ class Store:
         rows = self.con.execute("SELECT * FROM wallet_profiles WHERE wallet IN (SELECT unnest(?))", [ids]).fetchall()
         return {w: WalletProfile(w, _opt_int(c), _opt_int(m), int(f)) for w, c, m, f in rows}
 
-    def stale_profiles(self, wallets: Iterable[str], *, now: int, ttl_s: int) -> set[str]:
-        """Wallets whose profile is missing, older than ttl, or unknown (no creation time) and worth retrying."""
+    def stale_profiles(self, wallets: Iterable[str], *, now: int, ttl_s: int, unknown_ttl_s: int | None = None) -> set[str]:
+        """Wallets whose profile is missing or expired. Unknown profiles (no creation time) expire sooner, since
+        a brand-new account's profile may simply not exist yet — but not on every run."""
         ids = set(wallets)
-        fresh = {w for w, p in self.profiles(ids).items() if p.fetched_at >= now - ttl_s and p.created_ts is not None}
+        unknown_ttl = ttl_s if unknown_ttl_s is None else unknown_ttl_s
+        fresh = {w for w, p in self.profiles(ids).items()
+                 if p.fetched_at >= now - (ttl_s if p.created_ts is not None else unknown_ttl)}
         return ids - fresh
 
     def get_meta(self, key: str) -> str | None:

@@ -358,3 +358,12 @@ async def test_fresh_wallet_big_news_bet_is_an_insider_alert_listed_first(tmp_pa
     assert {c["code"] for c in ins["checks"]} == {f"I{i}" for i in range(1, 7)}
     assert any(s["kind"] == "SKILL" for s in signals)          # the certified whale (certified mode in tests)
     assert read(tmp_path, "meta.json")["counts"]["insiders"] == 1
+
+
+async def test_known_snipers_are_not_rejudged_as_insiders(tmp_path):
+    positions, markets, trades = world()
+    trades.append(Trade("0xhedge", NOW - 1800, "0xwhale", "live-no", "0xlive", "BUY", 0.60, 50_000.0, "it-happens",
+                        "Will it happen?", "No", 1, None))                 # conflicting bet by the certified whale
+    await run(tmp_path, (positions, markets, trades), skip_validation=True)
+    whale_contacts = [c for c in read(tmp_path, "contacts.json") if c["wallet"] == "0xwhale"]
+    assert whale_contacts and all(c["kind"] == "SKILL" for c in whale_contacts)
