@@ -1,0 +1,79 @@
+# Every threshold WHALESCAN uses. Paths are relative to the repo root unless absolute.
+
+[paths]
+research_db = "data/research.duckdb"
+scores_parquet = "data/scores.parquet"
+snapshot_dir = "data/snapshot"
+
+[http]
+rate_per_s = 5.0
+max_retries = 5
+concurrency = 8
+user_agent = "whalescan/0.1 (+https://github.com/whalescan)"
+
+[universe]
+max_wallets = 3000
+leaderboard_periods = ["ALL", "MONTH"]
+leaderboard_orders = ["PNL", "VOL"]
+leaderboard_pages = 10
+large_trade_min_usdc = 5000
+large_trade_lookback_days = 30
+
+[scoring]
+n_sims = 100000
+n_sims_screen = 2000
+screen_p = 0.2
+seed = 20260924
+min_n_eff = 20
+bh_q = 0.10
+min_post_edge = 0.03
+price_min = 0.03
+price_max = 0.97
+winsor_quantile = 0.95
+farmer_price = 0.95
+farmer_share = 0.60
+lottery_price = 0.05
+lottery_share = 0.60
+mm_both_sides_share = 0.30
+
+[gate]
+aggregation_window_s = 600
+min_usdc = 5000
+conviction_k = 2.0
+price_min = 0.05
+price_max = 0.95
+min_hours_to_end = 2.0
+follow_size_usdc = 1000
+min_net_edge = 0.02
+max_entry_margin = 0.01
+tier_a_net_edge = 0.05
+tier_a_consensus = 2
+conflict_window_h = 24
+fallback_max_cat_positions = 10
+signal_lookback_h = 24
+max_contacts = 300
+
+[validation]
+fold_days = 14
+min_history_days = 60
+slippage = 0.015
+n_sims = 20000
+max_wallets = 300
+every_hours = 24
+min_signals = 30
+
+[blocklist]
+slug_patterns = ["updown", "up-or-down", "-(5|15)m-"]
+min_market_volume = 10000
+
+[categories]
+order = ["CRYPTO", "POLITICS", "GEOPOLITICS", "ECONOMY", "TECH", "SPORTS", "CULTURE"]
+
+[categories.tags]
+CRYPTO = ["crypto", "bitcoin", "ethereum", "solana", "crypto prices"]
+POLITICS = ["politics", "elections", "us politics", "global elections", "trump"]
+GEOPOLITICS = ["geopolitics", "world", "middle east", "ukraine", "israel", "china"]
+ECONOMY = ["economy", "fed", "finance", "business", "stocks", "economic policy"]
+TECH = ["tech", "ai", "science", "big tech"]
+SPORTS = ["sports", "esports", "nfl", "nba", "mlb", "nhl", "soccer", "games", "tennis", "ufc"]
+CULTURE = ["culture", "pop culture", "movies", "music", "awards", "mentions", "tweets", "celebrities"]
