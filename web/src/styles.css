@@ -62,9 +62,11 @@ b { font-weight: 600; }
     grid-template-areas: "signals" "book" "dossier" "contacts" "validation";
   }
   .panel { min-height: 320px; }
+  .truncate, .area-contacts td.truncate { max-width: 150px; }
 }
 
-.panel { position: relative; display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+/* min-width: 0 lets a grid item shrink below its content (wide tables scroll inside the panel instead of widening the page) */
+.panel { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--panel); }
 .panel::before, .panel::after {
   content: ''; position: absolute; width: 8px; height: 8px; border-color: var(--dim); border-style: solid; pointer-events: none;
 }
@@ -108,6 +110,8 @@ td.num, th.num { text-align: right; }
 .link { background: none; border: 0; padding: 0; color: var(--cyan); cursor: pointer; }
 .truncate { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gate-fail { color: var(--dim); text-transform: uppercase; }
+.area-contacts td, .area-dossier td { white-space: nowrap; }
+.area-contacts td.truncate { max-width: 240px; }
 
 .chart { height: 240px; }
 .ladder { display: grid; gap: 2px; margin-top: 12px; }

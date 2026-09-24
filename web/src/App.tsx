@@ -6,6 +6,7 @@ import { SignalsPanel } from './components/SignalsPanel';
 import { StatusBar } from './components/StatusBar';
 import { ValidationPanel } from './components/ValidationPanel';
 import { loadSnapshot } from './data';
+import { pickWallet } from './select';
 import type { Snapshot } from './types';
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -31,7 +32,7 @@ export default function App() {
     [snap, category],
   );
   const selected = signals.find((s) => s.id === selectedId) ?? signals[0] ?? null;
-  const wallet = walletPick ?? selected?.wallet ?? null;
+  const wallet = pickWallet(walletPick, selected?.wallet ?? null, snap?.whales ?? []);
   const whale = snap?.whales.find((w) => w.wallet === wallet) ?? null;
 
   useEffect(() => {
