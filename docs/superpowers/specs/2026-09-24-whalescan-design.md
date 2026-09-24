@@ -92,7 +92,7 @@ An embedded analytical database: a single file, no server, SQL that runs columna
 | Source | Endpoint | Used for |
 |---|---|---|
 | Data API — trades | `GET https://data-api.polymarket.com/trades?limit&offset&user&filterType=CASH&filterAmount` | backfill, whale discovery, wallet trade history (entry times) |
-| Data API — closed positions | `GET https://data-api.polymarket.com/closed-positions?user=&limit&offset` | resolved positions: `avgPrice`, `totalBought`, `realizedPnl`, `curPrice` (1/0 at resolution), `conditionId`, `outcome`, `timestamp` |
+| Data API — closed positions | `GET https://data-api.polymarket.com/closed-positions?user=&limit&offset&sortBy=TIMESTAMP&sortDirection=DESC` | resolved positions: `avgPrice`, `totalBought`, `realizedPnl`, `curPrice` (1/0 at resolution), `conditionId`, `outcome`, `timestamp`. **Default sort is `realizedPnl` descending** (verified: page 1 of a top wallet = 100% winners, ascending sort = 100% losers). We always sort by `TIMESTAMP` and paginate to exhaustion; a truncated fetch is recorded as `incomplete` and the wallet is not testable — otherwise scoring suffers survivorship bias. |
 | Data API — leaderboard | `GET https://data-api.polymarket.com/v1/leaderboard?limit&...` | wallet universe seeding |
 | Gamma — markets/events | `GET https://gamma-api.polymarket.com/markets`, `/events?slug=` | market metadata, `endDate`, `feesEnabled`, `clobTokenIds`, event `tags` |
 | CLOB — book | `GET https://clob.polymarket.com/book?token_id=` | order-book snapshot (snapshot mode, resync) |
@@ -194,7 +194,9 @@ whalescan/
 - `rtds.py`: parses trade payloads → `Trade`, pushes into a bounded `asyncio.Queue(maxsize=50_000)`. On reconnect, backfills the gap from REST `/trades` for trades ≥ `min_backfill_usdc`.
 - `clob_ws.py`: manages the **watch set** of tokens (tokens touched by certified whales in the last 24h, plus tokens with open signals; capped at 200). Resubscribes when the set changes. Routes `book` → `apply_snapshot`, `price_change` → `apply_delta`, crossed book → REST resnapshot.
 
-### 4.3 Storage (`store.py`, DuckDB file `data/whalescan.duckdb`, gitignored)
+### 4.3 Storage (`store.py`, DuckDB, gitignored)
+
+DuckDB allows only one writing process per file, so each process owns its own file: `data/research.duckdb` is written only by `score` / `batch` / `validate`, and `data/live.duckdb` only by `live`. Scoring publishes its results by writing `data/scores.parquet` to a temp file and atomically renaming it; the live station reloads that parquet when its modification time changes. Every command takes an advisory lock file (`data/<name>.lock`) and exits with a clear message if another process holds it, instead of surfacing a raw DuckDB lock error.
 
 Tables: `trades(tx_hash PK, ts, wallet, asset, condition_id, side, price, size, usdc, event_slug, fee)`, `positions(wallet, asset PK-pair, avg_price, total_bought, realized_pnl, outcome, resolved_ts, category)`, `markets(condition_id PK, question, event_slug, end_date, fees_enabled, category, tags)`, `wallet_scores(wallet, category, as_of, n, n_eff, edge, post_edge, p_value, certified, flags)`, `signals(id PK, ts, ...)`. Upserts are idempotent (dedupe by `tx_hash` / natural keys), so re-running any step is safe.
 
@@ -210,7 +212,7 @@ Tables: `trades(tx_hash PK, ts, wallet, asset, condition_id, side, price, size, 
 ### 4.5 Scoring (`scoring.py`)
 
 1. **Universe**: union of leaderboard wallets (several windows) and every wallet with a ≥ $5,000 trade in the last 30 days; capped at `max_wallets` (default 3,000, ordered by volume).
-2. **Positions**: fetch closed positions per wallet; keep resolved ones with `curPrice ∈ {0, 1}`, entry `avgPrice ∈ [0.03, 0.97]`, non-blocklisted markets. Stake `w = totalBought · avgPrice`, **winsorized** at the wallet's 95th percentile so one giant bet can't dominate.
+2. **Positions**: fetch *all* closed positions per wallet (see Part 2 sort caveat). A position counts only if its market is resolved in Gamma (`closed = true` and `outcomePrices` exactly `["1","0"]` or `["0","1"]`), which gives `y ∈ {0, 1}`. Markets resolved fractionally (50/50 splits, disputed/voided) are **discarded** and counted in `wallet_scores.flags` — the no-skill null `y* ~ Bernoulli(p)` cannot produce fractional outcomes, so mixing them in would bias the test. Positions in markets that are still open (the wallet sold early) are excluded. Keep entry `avgPrice ∈ [0.03, 0.97]`, non-blocklisted markets. Stake `w = totalBought · avgPrice`, **winsorized** at the wallet's 95th percentile so one giant bet can't dominate.
 3. **Per (wallet, category)** and per (wallet, ALL): run `skill_mc_batch` (100k sims). Require `n_eff = (Σw)²/Σw² ≥ 20` to be testable.
 4. **Shrinkage**: estimate τ² by method of moments across testable wallets (`τ² = max(0, var(S) − mean(σ²))`), compute `post_edge`.
 5. **Certification**: BH at `q = 0.10` over all testable (wallet, category) tests jointly; certified ∧ `post_edge ≥ 0.03` ∧ no flags.
@@ -221,6 +223,8 @@ Tables: `trades(tx_hash PK, ts, wallet, asset, condition_id, side, price, size, 
 Raw trades → **position events**: fills by the same (wallet, asset, side) within 10 minutes are merged into one event with VWAP price and total USDC.
 
 A position event becomes a **signal** only if **all** pass (defaults in `config.toml`):
+
+**G6 in snapshot mode.** The question G6 answers is *"what would it cost to follow this trade now?"*, so the current book is the correct input (not the book at whale-trade time). In snapshot mode "now" is the batch run time, so every snapshot signal carries `book_as_of` and the UI shows its age (`BOOK 3H12M OLD`). Signals whose market has since resolved or whose position event is older than 24h are marked `EXPIRED`. Historical evaluation (validation, 4.7) never uses a current book — it uses the slippage model.
 
 | # | Check | Default |
 |---|---|---|
@@ -273,6 +277,7 @@ A position event becomes a **signal** only if **all** pass (defaults in `config.
 | WS disconnect / silent death | heartbeat timeout → reconnect with backoff+jitter; UI status turns red; REST backfill of trades on reconnect |
 | Missed book deltas / crossed book | discard book, REST resnapshot, resubscribe |
 | HTTP 429 / 5xx | token bucket + exponential retry (max 5); batch job logs and skips a wallet after exhausting retries rather than failing the run |
+| Blocked by Cloudflare / 403 challenge (e.g. GitHub runner IPs) | detected by status + HTML body; job fails loudly with `BLOCKED` in the log and keeps the previous snapshot. Fallback (still €0): run `whalescan batch --publish` locally, which commits and pushes the snapshot; no paid proxy |
 | Schema drift in API JSON | boundary parsers raise `ParseError` with the raw payload logged; message skipped, counter shown in status bar |
 | Missing market metadata | fetch Gamma on demand, cache; category `OTHER` if tags unavailable |
 | Batch job partial failure | writes snapshot only if scoring completed; otherwise keeps previous snapshot and the workflow fails visibly |
@@ -283,7 +288,7 @@ A position event becomes a **signal** only if **all** pass (defaults in `config.
 ## Part 6 — Testing
 
 - **C++ (Catch2, via CMake FetchContent):** order book snapshot/delta/erase, crossed detection, `walk` across multiple levels and partial fills, microprice formula; MC edge value exact, p-value ≈ 1 for a losing wallet, calibration test — for 2,000 simulated *no-skill* wallets p-values are ~uniform (fraction < 0.1 within [0.08, 0.12]), determinism across thread counts.
-- **Python (pytest):** parsers against recorded real JSON fixtures in `tests/fixtures/`; BH against a hand-computed example; shrinkage math; classifier flags; every gate G1–G7 with pass/fail cases; position-event aggregation windows; `ReconnectingWS` against a local test WS server that drops connections; end-to-end `batch` on fixtures producing snapshot JSON.
+- **Python (pytest):** parsers against recorded real JSON fixtures in `tests/fixtures/`; closed-positions pagination fetches every page with `sortBy=TIMESTAMP` and marks truncated histories `incomplete`; fractional/unresolved markets are excluded; BH against a hand-computed example; shrinkage math; classifier flags; every gate G1–G7 with pass/fail cases; position-event aggregation windows; `ReconnectingWS` against a local test WS server that drops connections; end-to-end `batch` on fixtures producing snapshot JSON.
 - **Web:** TypeScript typecheck + a Vitest test for the mode detection and message reducer.
 - **CI (`ci.yml`)** on every push: build C++ + run Catch2, `uv sync` + pytest, `npm ci && npm run build && npm test`.
 - **`snapshot.yml`:** cron `0 */6 * * *` + manual dispatch; runs `whalescan batch`, commits `data/snapshot/`, builds web, deploys Pages. Uses `actions/cache` for the raw position cache so each run only fetches deltas.
@@ -292,7 +297,7 @@ A position event becomes a **signal** only if **all** pass (defaults in `config.
 
 ## Part 7 — Build order (each milestone demo-able)
 
-1. **Foundation:** repo scaffold, API notes, `whalecore` MC + tests, API clients, DuckDB store, classification, scoring + BH. → `whalescan score` prints the certified whale table.
+1. **Foundation:** repo scaffold, **day-one Actions smoke test** (a workflow that calls each REST endpoint from a GitHub runner and fails on 403/challenge, so an IP block is discovered before anything depends on Actions), API notes, `whalecore` MC + tests, API clients, DuckDB store, classification, scoring + BH. → `whalescan score` prints the certified whale table.
 2. **Public snapshot:** batch pipeline, gate (with REST book for G6), validation, dashboard in snapshot mode, Actions + Pages. → public URL for the Junction application.
 3. **Live station:** reconnecting WS, RTDS ingest, FastAPI/WS server, dashboard live mode.
 4. **Books:** `whalecore.OrderBook`, CLOB WS watch set, live cost-to-follow, BOOK panel, STALE re-evaluation.
