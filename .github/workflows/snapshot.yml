@@ -56,8 +56,15 @@ jobs:
           exit 1
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
+      - name: Publish fresh alerts to the data branch
+        if: github.event_name != 'push' && !inputs.skip_batch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/publish-data.sh
       - name: Build dashboard
         working-directory: web
+        env:
+          VITE_ALERTS_URL: https://raw.githubusercontent.com/${{ github.repository }}/data/snapshot
         run: npm ci && npm run build
       - uses: actions/upload-pages-artifact@v3
         with: { path: web/dist }

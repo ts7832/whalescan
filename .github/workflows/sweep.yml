@@ -1,22 +1,21 @@
 name: insider-sweep
-# WHALESCAN's primary loop: every 15 minutes, read every >= $1k fill across Polymarket since the previous
-# sweep, look up the account age of new big news-market bettors, and redeploy the dashboard's alerts.
+# WHALESCAN's primary loop. GitHub drops many scheduled runs of small repos, so instead of relying on a
+# 15-minute cron, each job keeps sweeping every 15 minutes for ~5 hours. An hourly trigger only has to get
+# through once every few hours; a trigger that arrives while a job runs waits in the queue and takes over.
+# Each sweep publishes its alerts to the `data` branch, which the dashboard reads directly.
 on:
   schedule:
-    # Off-peak minutes: GitHub delays or drops scheduled runs at :00/:15/:30/:45, when everyone's cron fires.
-    - cron: "4,19,34,49 * * * *"
+    - cron: "7 * * * *"   # off-peak minute; hourly is plenty because every job runs for hours
   workflow_dispatch:
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 concurrency:
   group: insider-sweep
   cancel-in-progress: false
 jobs:
   sweep:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -27,29 +26,26 @@ jobs:
           path: data/sweep.duckdb
           key: sweep-${{ github.run_id }}
           restore-keys: sweep-
-      - name: Sweep
+      - name: Sweep every 15 minutes for ~5 hours
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           uv sync --locked
-          uv run whalescan sweep
+          stop=$((SECONDS + 320 * 60))
+          while :; do
+            began=$SECONDS
+            if uv run whalescan sweep; then
+              scripts/publish-data.sh || echo "::warning::publishing alerts failed; next round in 15 min"
+            else
+              echo "::warning::sweep round failed; next round in 15 min"
+            fi
+            [ $((SECONDS + 900)) -lt "$stop" ] || break
+            wait=$((900 - (SECONDS - began)))
+            [ "$wait" -gt 0 ] && sleep "$wait"
+          done
       - name: Save sweep window
         if: always()
         uses: actions/cache/save@v4
         with:
           path: data/sweep.duckdb
           key: sweep-${{ github.run_id }}
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
-      - name: Build dashboard
-        working-directory: web
-        run: npm ci && npm run build
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: web/dist }
-  deploy:
-    needs: sweep
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
