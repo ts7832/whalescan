@@ -25,7 +25,7 @@ def config(tmp):
     base = load_config()
     base = replace(base, gate=replace(base.gate, skill_mode="certified"))
     return replace(base, paths=PathsCfg(research_db=str(tmp / "r.duckdb"), scores_parquet=str(tmp / "s.parquet"),
-                                        snapshot_dir=str(tmp / "snap")))
+                                        snapshot_dir=str(tmp / "snap"), ledger_dir=str(tmp / "ledger")))
 
 
 class FakeGamma:

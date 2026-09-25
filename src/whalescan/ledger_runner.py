@@ -101,7 +101,7 @@ async def record_calls(ledger: Ledger, result: WindowResult, apis: Apis, cfg: Co
             continue
         kind, missed_rule = kind_rule
         call_id = f"{e.event.id}:{kind}"
-        if ledger.has_call(call_id):
+        if ledger.has_call(call_id) or ledger.has_call_for(e.event.wallet, e.event.asset, kind):
             continue
         market = result.markets.get(e.event.condition_id)
         vwap, complete = await _entry_quote(apis, cfg, e.event.asset)
@@ -128,10 +128,19 @@ async def process_marks(ledger: Ledger, apis: Apis, cfg: Config, now: int) -> in
         market = found.get(call["condition_id"])
         if market is None or not market.closed:
             continue
-        payout = market.outcome_prices[call["outcome_index"]]
-        irregular = market.winner_index() is None
+        outcome_index = call["outcome_index"]
+        if not (0 <= outcome_index < len(market.outcome_prices)):
+            log.error("call %s has outcome_index %d outside market %s's %d outcomes; skipping settlement",
+                     call["id"], outcome_index, market.condition_id, len(market.outcome_prices))
+            continue
+        clean_winner = market.winner_index() is not None
+        settled_long_enough = (market.closed_ts is not None
+                               and now - market.closed_ts >= cfg.ledger.settlement_grace_days * DAY)
+        if not clean_winner and not settled_long_enough:
+            continue  # closed, but outcome_prices may still be mid-UMA-resolution: wait rather than settle wrong
+        payout = market.outcome_prices[outcome_index]
         ledger.append_mark({"call_id": call["id"], "type": "SETTLEMENT", "day": None, "at": now,
-                            "best_bid": None, "payout": payout, "irregular": irregular,
+                            "best_bid": None, "payout": payout, "irregular": not clean_winner,
                             "return_pct": final_return(payout, call["entry_cost"])})
         processed += 1
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fmtCents, fmtDate, fmtPct, fmtUsd, fmtUtc, shortWallet } from '../format';
+import { fmtCents, fmtDate, fmtPct, fmtPrice, fmtReturn, fmtUtc, shortWallet } from '../format';
 import type { LedgerSummary, Validation } from '../types';
 import { Panel } from './Panel';
 
@@ -77,9 +77,9 @@ function TrackRecordBody({ ledger }: { ledger: LedgerSummary | null }) {
               <td className="num">{s.calls}</td>
               <td className="num">{s.open}</td>
               <td className="num">{fmtPct(s.hit_rate)}</td>
-              <td className={`num ${s.mean_return != null && s.mean_return > 0 ? 'green' : s.mean_return != null ? 'red' : ''}`}>{fmtCents(s.mean_return)}</td>
-              <td className="num">{fmtCents(s.day7_mean_return)}</td>
-              <td className="num">{fmtCents(s.day28_mean_return)}</td>
+              <td className={`num ${s.mean_return != null && s.mean_return > 0 ? 'green' : s.mean_return != null ? 'red' : ''}`}>{fmtReturn(s.mean_return)}</td>
+              <td className="num">{fmtReturn(s.day7_mean_return)}</td>
+              <td className="num">{fmtReturn(s.day28_mean_return)}</td>
             </tr>
           ))}
         </tbody>
@@ -97,9 +97,9 @@ function TrackRecordBody({ ledger }: { ledger: LedgerSummary | null }) {
               <td>{KIND_LABEL[c.kind]}{c.missed_rule ? ` · ${c.missed_rule}` : ''}</td>
               <td className="truncate" title={c.question}>{c.question}</td>
               <td>{shortWallet(c.wallet)}</td>
-              <td className="num">{fmtUsd(c.entry_cost != null ? c.entry_cost * 1000 : null)}</td>
-              <td className={c.status === 'WIN' ? 'green' : c.status === 'LOSS' ? 'red' : ''}>{c.status}</td>
-              <td className={`num ${c.latest_return != null && c.latest_return > 0 ? 'green' : c.latest_return != null ? 'red' : ''}`}>{fmtCents(c.latest_return)}</td>
+              <td className="num" title="Cost per share, incl. fees">{fmtPrice(c.entry_cost)}</td>
+              <td className={c.status === 'WIN' ? 'green' : c.status === 'LOSS' ? 'red' : c.status === 'IRREGULAR' ? 'amber' : ''}>{c.status}</td>
+              <td className={`num ${c.latest_return != null && c.latest_return > 0 ? 'green' : c.latest_return != null ? 'red' : ''}`}>{fmtReturn(c.latest_return)}</td>
             </tr>
           ))}
         </tbody>

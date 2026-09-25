@@ -176,3 +176,39 @@ def test_summary_never_contains_nan_or_infinity():
 
 def test_summary_generated_at_is_now():
     assert build_summary([], [], CFG, NOW)["generated_at"] == NOW
+
+
+def irregular_settlement(call_id, return_pct, at, payout=0.5):
+    return {"call_id": call_id, "type": "SETTLEMENT", "day": None, "at": at, "best_bid": None, "payout": payout,
+           "irregular": True, "return_pct": return_pct}
+
+
+def test_irregular_settlements_get_their_own_status_not_win_or_loss():
+    calls = [call("a")]
+    marks = [irregular_settlement("a", -0.53, NOW)]
+    summary = build_summary(calls, marks, CFG, NOW)
+    [row] = summary["recent"]
+    assert row["status"] == "IRREGULAR"
+
+
+def test_irregular_settlements_are_excluded_from_hit_rate_and_mean_return():
+    calls = [call("a", kind="INSIDER"), call("b", kind="INSIDER")]
+    marks = [settlement("a", 0.5, NOW), irregular_settlement("b", -0.9, NOW)]
+    stats = build_summary(calls, marks, CFG, NOW)["by_kind"]["INSIDER"]
+    assert stats["settled"] == 2       # both count toward "settled"
+    assert stats["hit_rate"] == 1.0    # only the clean win counts toward hit rate
+    assert stats["mean_return"] == 0.5  # the irregular return doesn't drag the mean down
+
+
+def test_irregular_settlements_are_excluded_from_feature_analysis():
+    calls, marks = [], []
+    for i in range(35):
+        won = i % 2 == 0
+        calls.append(call(f"c{i}", age_days=1.0 if won else 20.0))
+        marks.append(settlement(f"c{i}", 0.5 if won else -0.5, NOW))
+    calls.append(call("irregular", age_days=999.0))  # an outlier that must not leak into the comparison
+    marks.append(irregular_settlement("irregular", 0.0, NOW))
+    summary = build_summary(calls, marks, CFG, NOW)
+    assert summary["analysis"]["n_scored"] == 35  # irregular doesn't count as "scored" for the analysis gate
+    age = summary["analysis"]["features"]["age_days"]
+    assert age["n_winners"] + age["n_losers"] == 35

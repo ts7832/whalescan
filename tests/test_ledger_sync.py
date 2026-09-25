@@ -90,3 +90,69 @@ def test_concurrent_push_rebases_instead_of_losing_the_other_writer(tmp_path, ba
     subprocess.run(["git", "clone", "-q", "-b", "ledger", bare_remote, str(check)], check=True)
     assert (check / "calls.jsonl").read_text() == '{"id":"a"}\n'
     assert (check / "marks.jsonl").read_text() == '{"call_id":"a"}\n'
+
+
+def test_unreachable_remote_is_a_hard_failure_not_treated_as_no_branch_yet(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "calls.jsonl").write_text('{"id":"a"}\n')
+    bad_url = f"file://{tmp_path / 'does-not-exist.git'}"
+    result = run("push", tmp_path, work, bad_url)
+    assert result.returncode != 0
+    assert not (work / ".git").exists()  # must not have silently git-init'd a fresh, disconnected history
+
+
+def test_summary_json_conflict_resolves_to_the_incoming_copy_and_the_push_still_succeeds(tmp_path, bare_remote):
+    # summary.json is fully regenerated every round, so on a genuine conflict there is nothing to merge:
+    # take the incoming copy and keep going, rather than treating a routine conflict as a hard failure.
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "summary.json").write_text('{"generated_at": 1}\n')
+    (base / "calls.jsonl").write_text("")
+    run("push", tmp_path, base, bare_remote)
+
+    # both writers start from the SAME base commit, so their later pushes genuinely diverge
+    work_a = tmp_path / "a"
+    run("pull", tmp_path, work_a, bare_remote)
+    work_b = tmp_path / "b"
+    run("pull", tmp_path, work_b, bare_remote)
+
+    (work_a / "summary.json").write_text('{"generated_at": 2}\n')
+    run("push", tmp_path, work_a, bare_remote)  # remote now ahead of work_b's clone point
+
+    (work_b / "summary.json").write_text('{"generated_at": 3}\n')
+    (work_b / "calls.jsonl").write_text('{"id":"from-b"}\n')
+    result = run("push", tmp_path, work_b, bare_remote)
+    assert result.returncode == 0, result.stderr
+
+    check = tmp_path / "check"
+    subprocess.run(["git", "clone", "-q", "-b", "ledger", bare_remote, str(check)], check=True)
+    assert (check / "summary.json").read_text() == '{"generated_at": 3}\n'  # b's own copy of its own push
+    assert (check / "calls.jsonl").read_text() == '{"id":"from-b"}\n'
+    # the repo must not be left mid-rebase
+    status = subprocess.run(["git", "-C", str(work_b), "status", "--porcelain"], capture_output=True, text=True)
+    assert status.stdout.strip() == ""
+
+
+def test_a_real_content_conflict_outside_summary_json_aborts_cleanly(tmp_path, bare_remote):
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "notes.txt").write_text("line one\n")
+    run("push", tmp_path, base, bare_remote)
+
+    work_a = tmp_path / "a"
+    run("pull", tmp_path, work_a, bare_remote)
+    work_b = tmp_path / "b"
+    run("pull", tmp_path, work_b, bare_remote)  # both start from the same base, so they can truly diverge
+
+    (work_a / "notes.txt").write_text("line one\nfrom a\n")
+    run("push", tmp_path, work_a, bare_remote)
+
+    (work_b / "notes.txt").write_text("line one\nfrom b\n")  # a genuine same-line conflict with writer A
+    result = run("push", tmp_path, work_b, bare_remote)
+
+    assert result.returncode != 0
+    status = subprocess.run(["git", "-C", str(work_b), "status", "--porcelain"], capture_output=True, text=True)
+    assert "UU" not in status.stdout
+    rebase_state = subprocess.run(["git", "-C", str(work_b), "status"], capture_output=True, text=True).stdout
+    assert "rebase in progress" not in rebase_state

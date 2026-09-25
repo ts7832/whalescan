@@ -16,7 +16,7 @@ class PathsCfg:
     research_db: str
     scores_parquet: str
     snapshot_dir: str
-    ledger_dir: str = "data/ledger"
+    ledger_dir: str
 
 
 @dataclass(frozen=True)
@@ -130,6 +130,7 @@ class LedgerCfg:
     near_miss_markets_max: int
     near_miss_usdc_min: float
     min_scored: int
+    settlement_grace_days: float
 
 
 @dataclass(frozen=True)

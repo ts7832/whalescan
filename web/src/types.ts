@@ -123,7 +123,7 @@ export interface LedgerRecentCall {
   category: string;
   tier: string | null;
   entry_cost: number | null;
-  status: 'OPEN' | 'WIN' | 'LOSS';
+  status: 'OPEN' | 'WIN' | 'LOSS' | 'IRREGULAR';
   latest_return: number | null;
   missed_rule: string | null;
 }

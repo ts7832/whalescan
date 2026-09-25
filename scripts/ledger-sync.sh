@@ -29,10 +29,21 @@ dir="${LEDGER_DIR:-data/ledger}"
 
 if [ ! -d "$dir/.git" ]; then
   mkdir -p "$(dirname "$dir")"
-  if git ls-remote --exit-code --heads "$url" ledger >/dev/null 2>&1; then
+  set +e
+  git ls-remote --exit-code --heads "$url" ledger >/dev/null 2>&1
+  ls_remote_status=$?
+  set -e
+  if [ "$ls_remote_status" -eq 0 ]; then
     git clone -q -b ledger --single-branch "$url" "$dir"
-  else
+  elif [ "$ls_remote_status" -eq 2 ]; then
+    # exit code 2 specifically means "reachable, but the ledger branch doesn't exist yet" (first run ever).
+    # Any OTHER failure (network, auth, a bad URL) must not be treated the same way: silently starting a
+    # fresh, disconnected history would re-log every open call at today's price and fight the real branch
+    # on the next push.
     git init -q -b ledger "$dir"
+  else
+    echo "ledger-sync: could not reach $url (ls-remote exit $ls_remote_status); not initialising a fresh ledger" >&2
+    exit 1
   fi
   git -C "$dir" config user.name whalescan-bot
   git -C "$dir" config user.email whalescan-bot@users.noreply.github.com
@@ -59,7 +70,31 @@ for _ in 1 2 3; do
     exit 0
   fi
   git -C "$dir" fetch -q origin ledger
-  git -C "$dir" rebase -q origin/ledger
+  set +e
+  git -C "$dir" rebase -q origin/ledger 2>/dev/null
+  rebase_status=$?
+  set -e
+  if [ "$rebase_status" -ne 0 ]; then
+    # summary.json is fully regenerated every round from calls.jsonl/marks.jsonl, so a conflict there is
+    # never real content to merge: keep the incoming copy (it will be rewritten fresh next round anyway)
+    # and continue. A conflict anywhere else is a genuine divergence this script cannot safely resolve —
+    # abort back to a clean, non-rebasing state so the NEXT round gets a fresh chance, instead of leaving
+    # every later round in this job stuck.
+    conflicted="$(git -C "$dir" diff --name-only --diff-filter=U)"
+    if [ "$conflicted" = "summary.json" ]; then
+      git -C "$dir" checkout --theirs -- summary.json
+      git -C "$dir" add summary.json
+      if ! GIT_EDITOR=true git -C "$dir" rebase --continue; then
+        git -C "$dir" rebase --abort
+        echo "ledger-sync: could not continue past a summary.json-only conflict; will retry next round" >&2
+        exit 1
+      fi
+    else
+      git -C "$dir" rebase --abort
+      echo "ledger-sync: real conflict outside summary.json (${conflicted:-unknown}); will retry next round" >&2
+      exit 1
+    fi
+  fi
   sleep 2
 done
 echo "ledger-sync: push failed after 3 attempts" >&2

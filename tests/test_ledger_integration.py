@@ -42,8 +42,11 @@ class FakeData:
 class FakeGamma:
     skipped = 0
 
+    def __init__(self, extra=()):
+        self.markets_by_id = {"0xc": MARKET, **dict(extra)}
+
     async def markets(self, ids):
-        return {i: MARKET for i in ids if i == "0xc"}
+        return {i: self.markets_by_id[i] for i in ids if i in self.markets_by_id}
 
     async def created_ts(self, wallet):
         return NOW - DAY
@@ -112,3 +115,24 @@ def test_cli_ledger_command_runs_a_sweep_round_and_reports_ledger_activity(monke
     assert cli.main(["ledger"]) == 0
     out = capsys.readouterr().out
     assert "5 calls" in out and "2 open" in out and "3 settled" in out
+
+
+async def test_a_ledger_error_never_blocks_alert_publishing(tmp_path, caplog):
+    import logging
+
+    cfg = config(tmp_path)
+    closed_market = replace(MARKET, condition_id="0xbad", closed=True, closed_ts=NOW - 40 * DAY,
+                            outcome_prices=(1.0, 0.0))
+    apis = Apis(FakeData(fresh_bet()), FakeGamma({"0xbad": closed_market}), FakeClob())
+    (tmp_path / "ledger").mkdir()
+    # a hand-corrupted call whose stored outcome_index doesn't fit its (now closed) market -> would raise
+    # with an unguarded IndexError inside process_marks' settlement path
+    (tmp_path / "ledger" / "calls.jsonl").write_text(
+        '{"id":"broken","kind":"INSIDER","condition_id":"0xbad","outcome_index":99,"entry_cost":0.4,'
+        '"call_ts":1,"schedule":[],"wallet":"0xw","asset":"yes","question":"q","category":"POLITICS",'
+        '"tier":"B","usdc":1,"missed_rule":null}\n')
+    with caplog.at_level(logging.ERROR):
+        report = await run_sweep(cfg, apis=apis, now=NOW)
+    assert json.loads((tmp_path / "snap" / "signals.json").read_text())
+    assert report.signals == 1
+    assert "ledger" in caplog.text.lower()

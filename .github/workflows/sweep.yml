@@ -33,7 +33,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           uv sync --locked
-          scripts/ledger-sync.sh pull
+          scripts/ledger-sync.sh pull || echo "::warning::could not pull the ledger; starting this job with what's on disk"
           stop=$((SECONDS + 320 * 60))
           while :; do
             began=$SECONDS

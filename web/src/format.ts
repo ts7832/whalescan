@@ -10,6 +10,11 @@ export const fmtPrice = (p: Num): string => (p == null ? '—' : p.toFixed(3));
 export const fmtCents = (e: Num): string =>
   e == null ? '—' : `${e >= 0 ? '+' : '−'}${Math.abs(e * 100).toFixed(1)}¢`;
 
+/** A ledger call's return is a fraction of entry cost (e.g. 1.33 = +133%), not a per-share cents figure —
+ * always format it as a percentage so it isn't misread as a tiny per-share move. */
+export const fmtReturn = (r: Num): string =>
+  r == null ? '—' : `${r >= 0 ? '+' : '−'}${Math.abs(r * 100).toFixed(1)}%`;
+
 export const fmtP = (p: Num): string =>
   p == null ? '—' : p < 1e-3 ? p.toExponential(1).toUpperCase() : p.toFixed(3);
 

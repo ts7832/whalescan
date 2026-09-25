@@ -81,7 +81,11 @@ async def run_sweep(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             signals, contacts = result.signals, result.contacts
 
             # Track Record: log any new call this window surfaced and advance every open call's marks.
-            await run_ledger_round(cfg.path(cfg.paths.ledger_dir), result, apis, cfg, now)
+            # A secondary feature must never be able to break the primary one — guard it and move on.
+            try:
+                await run_ledger_round(cfg.path(cfg.paths.ledger_dir), result, apis, cfg, now)
+            except Exception:  # noqa: BLE001 — log with traceback, never let a ledger bug block alerts
+                log.exception("ledger round failed; alerts still publish")
     finally:
         if http is not None:
             await http.aclose()

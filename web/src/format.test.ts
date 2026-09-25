@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtAge, fmtCents, fmtP, fmtPrice, fmtUsd, shortWallet, signalsEmptyMessage } from './format';
+import { fmtAge, fmtCents, fmtP, fmtPrice, fmtReturn, fmtUsd, shortWallet, signalsEmptyMessage } from './format';
 import type { Meta } from './types';
 
 const meta = (certified: number): Meta => ({
@@ -64,5 +64,13 @@ describe('insider badge', () => {
     const s = { checks: [{ code: 'I1', passed: true, detail: 'BUY' }, { code: 'I2', passed: true, detail: '1.2D OLD' },
       { code: 'I3', passed: true, detail: '2 MARKETS' }] } as unknown as Signal;
     expect(insiderBadge(s)).toBe('FRESH WALLET · 1.2D OLD · 2 MARKETS');
+  });
+});
+
+describe('fmtReturn', () => {
+  it('formats a return fraction as a signed percentage, not cents', () => {
+    expect(fmtReturn(1.33)).toBe('+133.0%');
+    expect(fmtReturn(-0.5)).toBe('−50.0%');
+    expect(fmtReturn(null)).toBe('—');
   });
 });

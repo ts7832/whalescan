@@ -114,6 +114,7 @@ near_miss_age_max_days = 30
 near_miss_markets_max = 30
 near_miss_usdc_min = 5000
 min_scored = 30
+settlement_grace_days = 7  # a closed market with no clean winner may still be mid-UMA-resolution
 
 [blocklist]
 slug_patterns = ["updown", "up-or-down", "-(5|15)m-"]

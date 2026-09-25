@@ -50,6 +50,13 @@ class Ledger:
     def has_call(self, call_id: str) -> bool:
         return any(c["id"] == call_id for c in self.calls())
 
+    def has_call_for(self, wallet: str, asset: str, kind: str) -> bool:
+        """Has any call of this kind ever been logged for this (wallet, asset) — regardless of the exact
+        event id. aggregate() ids a position event by its earliest fill's timestamp; once that fill is
+        pruned from the rolling trade window, the remaining fills regroup under a new id. Without this,
+        the same underlying position would be logged again as a "new" call at whatever price it re-forms."""
+        return any(c["wallet"] == wallet and c["asset"] == asset and c["kind"] == kind for c in self.calls())
+
     def append_call(self, call: dict[str, Any]) -> None:
         _append_jsonl(self._calls_path, call)
 

@@ -148,7 +148,10 @@ def _kind_stats(calls: list[dict[str, Any]], by_call: dict[str, dict[str, Any]],
     ids = [c["id"] for c in calls]
     open_ids = [i for i in ids if i not in settled]
     settled_marks = [settled[i] for i in ids if i in settled]
-    returns = [m["return_pct"] for m in settled_marks if m["return_pct"] is not None]
+    # Irregular settlements (voided/split markets) count toward "settled" but not toward hit rate or mean
+    # return: neither a real win nor a real loss, so mixing them in would misrepresent both.
+    clean_marks = [m for m in settled_marks if not m.get("irregular")]
+    returns = [m["return_pct"] for m in clean_marks if m["return_pct"] is not None]
     wins = [1.0 if r > 0 else 0.0 for r in returns]
 
     def day_mean(day: int) -> float | None:
@@ -166,7 +169,10 @@ def _kind_stats(calls: list[dict[str, Any]], by_call: dict[str, dict[str, Any]],
 
 def _recent_row(call: dict[str, Any], settled: dict[str, Any] | None, latest: dict[str, Any] | None) -> dict[str, Any]:
     if settled is not None:
-        status = "WIN" if settled["return_pct"] is not None and settled["return_pct"] > 0 else "LOSS"
+        if settled.get("irregular"):
+            status = "IRREGULAR"
+        else:
+            status = "WIN" if settled["return_pct"] is not None and settled["return_pct"] > 0 else "LOSS"
         latest_return = _finite(settled["return_pct"])
     else:
         status = "OPEN"
@@ -194,13 +200,13 @@ def build_summary(calls: list[dict[str, Any]], marks: list[dict[str, Any]], cfg:
     recent = sorted(calls, key=lambda c: -c["call_ts"])[:100]
     recent_rows = [_recent_row(c, settled.get(c["id"]), latest.get(c["id"])) for c in recent]
 
-    n_scored = len(settled)
+    n_scored = sum(1 for m in settled.values() if not m.get("irregular"))
     analysis: dict[str, Any] = {"status": "INSUFFICIENT DATA", "n_scored": n_scored, "features": {},
                                 "buckets": {}, "model": {"status": "INSUFFICIENT DATA", "auc": None,
                                                          "coefficients": None, "n": n_scored}}
     if n_scored >= cfg.ledger.min_scored:
         analysis["status"] = "OK"
-        scored_ids = [c["id"] for c in calls if c["id"] in settled]
+        scored_ids = [c["id"] for c in calls if c["id"] in settled and not settled[c["id"]].get("irregular")]
         returns = [settled[i]["return_pct"] for i in scored_ids]
         wins = [r is not None and r > 0 for r in returns]
         feature_rows = []

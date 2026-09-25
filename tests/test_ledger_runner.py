@@ -170,7 +170,9 @@ async def test_settlement_closes_the_call_with_exactly_one_mark_and_no_late_chec
     assert await process_marks(led, apis2, cfg, now=NOW + 100 * DAY) == 0
 
 
-async def test_irregular_settlement_is_flagged(tmp_path):
+async def test_a_fractional_result_waits_out_the_settlement_grace_period_before_flagging_irregular(tmp_path):
+    # A market closed but stuck at a fractional split could still be mid-UMA-resolution: settling it
+    # immediately risks a permanently wrong SETTLEMENT mark (the ledger is append-only). Wait it out.
     cfg = config(tmp_path)
     led = Ledger(tmp_path / "ledger")
     apis = Apis(FakeData(), FakeGamma(), FakeClob())
@@ -179,8 +181,28 @@ async def test_irregular_settlement_is_flagged(tmp_path):
 
     voided = replace(OPEN_MARKET, closed=True, closed_ts=NOW + 40 * DAY, outcome_prices=(0.5, 0.5))
     apis2 = Apis(FakeData(), FakeGamma({"0xc": voided}), FakeClob())
-    await process_marks(led, apis2, cfg, now=NOW + 40 * DAY)
-    assert led.marks()[0]["irregular"] is True
+    grace = cfg.ledger.settlement_grace_days * DAY
+
+    await process_marks(led, apis2, cfg, now=NOW + 40 * DAY + grace - DAY)
+    assert not any(m["type"] == "SETTLEMENT" for m in led.marks())
+    assert led.open_calls()  # still open: not settled prematurely (its checkpoints may still fire)
+
+    await process_marks(led, apis2, cfg, now=NOW + 40 * DAY + grace + DAY)
+    [settlement] = [m for m in led.marks() if m["type"] == "SETTLEMENT"]
+    assert settlement["irregular"] is True
+
+
+async def test_a_clean_winner_settles_immediately_without_waiting_for_the_grace_period(tmp_path):
+    cfg = config(tmp_path)
+    led = Ledger(tmp_path / "ledger")
+    apis = Apis(FakeData(), FakeGamma(), FakeClob())
+    result = await window(cfg, apis)
+    await record_calls(led, result, apis, cfg, NOW)
+
+    settled = replace(OPEN_MARKET, closed=True, closed_ts=NOW + 40 * DAY, outcome_prices=(1.0, 0.0))
+    apis2 = Apis(FakeData(), FakeGamma({"0xc": settled}), FakeClob())
+    processed = await process_marks(led, apis2, cfg, now=NOW + 40 * DAY)  # same instant as closed_ts
+    assert processed == 1 and led.marks()[0]["irregular"] is False
 
 
 async def test_missing_book_at_a_checkpoint_retries_then_gives_up_after_24h(tmp_path):
@@ -196,3 +218,26 @@ async def test_missing_book_at_a_checkpoint_retries_then_gives_up_after_24h(tmp_
     processed = await process_marks(led, apis_no_book, cfg, now=NOW + 7 * DAY + 25 * 3600)
     assert processed == 1
     assert led.marks()[0]["missing"] is True and led.marks()[0]["return_pct"] is None
+
+
+async def test_a_regrouped_event_does_not_relog_the_same_wallet_and_market(tmp_path):
+    # aggregate() ids events by (wallet, asset, side, first fill's ts). If the group's earliest fill ages
+    # out of the sweep's rolling window and gets pruned, the remaining fills regroup under a NEW first_ts
+    # -> a new event id -> without this guard, a phantom "new" call for the same underlying position.
+    cfg = config(tmp_path)
+    apis = Apis(FakeData(), FakeGamma(), FakeClob())
+    led = Ledger(tmp_path / "ledger")
+
+    result = await window(cfg, apis, tx="0x1")
+    await record_calls(led, result, apis, cfg, NOW)
+    assert [c["kind"] for c in led.calls()] == ["INSIDER"]
+
+    with Store(cfg.path(cfg.paths.research_db)) as store:
+        # simulate the regroup: same wallet/market/outcome, but a later first_ts (the earlier fill was pruned)
+        store.upsert_trades([Trade("0x2", NOW + 100, "0xfresh1", "yes", "0xc", "BUY", 0.40, 30_000.0 / 0.40,
+                                   "x-happen", "q", "Yes", 0, None)])
+        book = ScoreBook.for_config(pd.DataFrame(columns=SCORE_COLUMNS), cfg)
+        r2 = await evaluate_window(apis, store, cfg, book, Blocklist(cfg.blocklist), NOW + 100, NOW - 3500)
+    logged = await record_calls(led, r2, apis, cfg, NOW + 100)
+    assert logged == 0
+    assert len(led.calls()) == 1
