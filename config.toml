@@ -102,6 +102,18 @@ every_hours = 24
 min_signals = 30
 min_wallets = 10
 
+[ledger]
+# Track Record: log every call, price it realistically, follow it to settlement (see the Track Record spec).
+entry_size_usdc = 1000
+checkpoint_days = [7, 14, 21, 28]
+monthly_step_days = 30
+quarterly_step_days = 91
+quarterly_after_years = 3
+near_miss_age_max_days = 30
+near_miss_markets_max = 30
+near_miss_usdc_min = 5000
+min_scored = 30
+
 [blocklist]
 slug_patterns = ["updown", "up-or-down", "-(5|15)m-"]
 min_market_volume = 10000

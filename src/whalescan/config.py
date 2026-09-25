@@ -119,6 +119,19 @@ class ValidationCfg:
 
 
 @dataclass(frozen=True)
+class LedgerCfg:
+    entry_size_usdc: float
+    checkpoint_days: tuple[int, ...]
+    monthly_step_days: int
+    quarterly_step_days: int
+    quarterly_after_years: float
+    near_miss_age_max_days: float
+    near_miss_markets_max: int
+    near_miss_usdc_min: float
+    min_scored: int
+
+
+@dataclass(frozen=True)
 class BlocklistCfg:
     slug_patterns: tuple[str, ...]
     min_market_volume: float
@@ -140,6 +153,7 @@ class Config:
     sniper: SniperCfg
     sweep: SweepCfg
     insider: InsiderCfg
+    ledger: LedgerCfg
     validation: ValidationCfg
     blocklist: BlocklistCfg
     categories: CategoriesCfg
@@ -176,6 +190,7 @@ def load_config(path: Path | None = None) -> Config:
         sniper=_section(SniperCfg, "sniper", raw["sniper"]),
         sweep=_section(SweepCfg, "sweep", raw["sweep"]),
         insider=_section(InsiderCfg, "insider", raw["insider"]),
+        ledger=_section(LedgerCfg, "ledger", raw["ledger"]),
         validation=_section(ValidationCfg, "validation", raw["validation"]),
         blocklist=_section(BlocklistCfg, "blocklist", raw["blocklist"]),
         categories=CategoriesCfg(
