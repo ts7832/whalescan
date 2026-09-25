@@ -5,15 +5,17 @@ import { DossierPanel } from './components/DossierPanel';
 import { SignalsPanel } from './components/SignalsPanel';
 import { StatusBar } from './components/StatusBar';
 import { ValidationPanel } from './components/ValidationPanel';
-import { loadSnapshot } from './data';
+import { loadLedgerSummary, loadSnapshot } from './data';
 import { applyMessage, connectLive, tryLive } from './live';
 import { pickWallet } from './select';
-import type { Snapshot } from './types';
+import type { LedgerSummary, Snapshot } from './types';
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
+const LEDGER_REFRESH_MS = 60_000; // the ledger only changes once per sweep round (~15 min); no need to poll faster
 
 export default function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
+  const [ledger, setLedger] = useState<LedgerSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [walletPick, setWalletPick] = useState<string | null>(null);
@@ -35,6 +37,14 @@ export default function App() {
     })().catch((e: unknown) => setError(String(e instanceof Error ? e.message : e)));
     const t = setInterval(() => setNow(nowSeconds()), 1000);
     return () => { clearInterval(t); stopLive?.(); };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => { loadLedgerSummary().then((s) => { if (!cancelled) setLedger(s); }); };
+    refresh();
+    const t = setInterval(refresh, LEDGER_REFRESH_MS);
+    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
   const categories = useMemo(() => [...new Set((snap?.signals ?? []).map((s) => s.category))].sort(), [snap]);
@@ -74,7 +84,7 @@ export default function App() {
         <BookPanel signal={selected} now={now} followSize={snap.meta.params.follow_size_usdc} />
         <DossierPanel whale={whale} wallet={wallet} />
         <ContactsPanel contacts={snap.contacts} now={now} onWallet={setWalletPick} />
-        <ValidationPanel validation={snap.validation} />
+        <ValidationPanel validation={snap.validation} ledger={ledger} />
       </main>
     </>
   );

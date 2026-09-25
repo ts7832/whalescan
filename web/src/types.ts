@@ -100,6 +100,75 @@ export interface Meta {
 
 export interface Snapshot { meta: Meta; signals: Signal[]; contacts: Signal[]; whales: Whale[]; validation: Validation | null }
 
+// --- Track Record ledger (data.ts loadLedgerSummary; the `ledger` branch's summary.json) ---
+
+export type LedgerKind = 'INSIDER' | 'SNIPER' | 'NEAR_MISS';
+
+export interface LedgerKindStats {
+  calls: number;
+  open: number;
+  settled: number;
+  hit_rate: number | null;
+  mean_return: number | null;
+  day7_mean_return: number | null;
+  day28_mean_return: number | null;
+}
+
+export interface LedgerRecentCall {
+  id: string;
+  kind: LedgerKind;
+  call_ts: number;
+  wallet: string;
+  question: string;
+  category: string;
+  tier: string | null;
+  entry_cost: number | null;
+  status: 'OPEN' | 'WIN' | 'LOSS';
+  latest_return: number | null;
+  missed_rule: string | null;
+}
+
+export interface LedgerFeatureStat {
+  n_winners: number;
+  n_losers: number;
+  winners_median: number | null;
+  losers_median: number | null;
+  winners_mean: number | null;
+  losers_mean: number | null;
+  p_value: number | null;
+}
+
+export interface LedgerBucket {
+  lo: number;
+  hi: number;
+  n: number;
+  win_rate: number | null;
+  mean_return: number | null;
+}
+
+export interface LedgerModel {
+  status: 'OK' | 'INSUFFICIENT DATA';
+  auc: number | null;
+  coefficients: Record<string, number> | null;
+  n: number;
+}
+
+export interface LedgerAnalysis {
+  status: 'OK' | 'INSUFFICIENT DATA';
+  n_scored: number;
+  features: Record<string, LedgerFeatureStat>;
+  buckets: Record<string, LedgerBucket[]>;
+  model: LedgerModel;
+}
+
+export interface LedgerSummary {
+  generated_at: number;
+  totals: { calls: number; open: number; settled: number };
+  by_kind: Record<LedgerKind, LedgerKindStats>;
+  recent: LedgerRecentCall[];
+  analysis: LedgerAnalysis;
+}
+
 export type LiveMessage =
   | { type: 'state'; data: Snapshot }
   | { type: 'status'; data: Meta }

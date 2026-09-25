@@ -65,6 +65,7 @@ jobs:
         working-directory: web
         env:
           VITE_ALERTS_URL: https://raw.githubusercontent.com/${{ github.repository }}/data/snapshot
+          VITE_LEDGER_URL: https://raw.githubusercontent.com/${{ github.repository }}/ledger
         run: npm ci && npm run build
       - uses: actions/upload-pages-artifact@v3
         with: { path: web/dist }

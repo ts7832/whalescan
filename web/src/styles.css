@@ -139,3 +139,10 @@ td.num, th.num { text-align: right; }
 
 .boot { display: grid; place-items: center; height: 100%; letter-spacing: 0.2em; color: var(--dim); text-transform: uppercase; }
 .boot .red { max-width: 560px; text-align: center; }
+
+[role='tablist'] { display: flex; gap: 4px; }
+.tab-btn {
+  background: none; border: 1px solid var(--line); color: var(--dim); padding: 2px 8px;
+  text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; font: inherit; font-size: 10px;
+}
+.tab-btn.active { color: var(--cyan); border-color: var(--cyan); }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadSnapshot } from './data';
+import { loadLedgerSummary, loadSnapshot } from './data';
 
 function fakeFetch(files: Record<string, unknown>): typeof fetch {
   return (async (input: RequestInfo | URL) => {
@@ -57,5 +57,31 @@ describe('alerts from the data branch', () => {
       return files('./data', site)(input, init);
     }) as typeof fetch;
     expect((await loadSnapshot('./data', fetcher, 'https://raw.test/snapshot')).meta.generated_at).toBe(1);
+  });
+});
+
+describe('loadLedgerSummary', () => {
+  const fetcher = (async (input: RequestInfo | URL) =>
+    String(input) === 'https://raw.test/ledger/summary.json'
+      ? new Response(JSON.stringify({ generated_at: 5 }), { status: 200 })
+      : new Response('', { status: 404 })) as typeof fetch;
+
+  it('returns the summary when the ledger URL is configured and answers', async () => {
+    const summary = await loadLedgerSummary(fetcher, 'https://raw.test/ledger');
+    expect(summary?.generated_at).toBe(5);
+  });
+
+  it('returns null when no ledger URL is configured', async () => {
+    expect(await loadLedgerSummary(fetcher, undefined)).toBeNull();
+  });
+
+  it('returns null (not throw) when the ledger has never been published yet', async () => {
+    const notFound = (async () => new Response('', { status: 404 })) as typeof fetch;
+    expect(await loadLedgerSummary(notFound, 'https://raw.test/ledger')).toBeNull();
+  });
+
+  it('returns null (not throw) when the fetch itself fails', async () => {
+    const broken = (async () => { throw new TypeError('offline'); }) as typeof fetch;
+    expect(await loadLedgerSummary(broken, 'https://raw.test/ledger')).toBeNull();
   });
 });

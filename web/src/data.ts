@@ -1,7 +1,10 @@
-import type { Meta, Signal, Snapshot, Validation, Whale } from './types';
+import type { LedgerSummary, Meta, Signal, Snapshot, Validation, Whale } from './types';
 
 /** Where the 15-minute sweep publishes fresh alerts (the repo's `data` branch). Set at build time. */
 const ALERTS_URL: string | undefined = import.meta.env.VITE_ALERTS_URL;
+
+/** Where the sweep publishes the Track Record ledger's summary.json (the repo's `ledger` branch). */
+const LEDGER_URL: string | undefined = import.meta.env.VITE_LEDGER_URL;
 
 async function getJson<T>(url: string, fetcher: typeof fetch): Promise<T | null> {
   const r = await fetcher(url, { cache: 'no-store' });
@@ -33,4 +36,15 @@ export async function loadSnapshot(base = './data', fetcher: typeof fetch = fetc
   ]);
   if (!meta) throw new Error('NO SNAPSHOT DATA — RUN `whalescan batch` FIRST');
   return { meta, signals: signals ?? [], contacts: contacts ?? [], whales: whales ?? [], validation };
+}
+
+/** The Track Record ledger's summary, or null when it isn't configured, hasn't been published yet,
+ * or can't currently be reached — the dashboard treats all three the same way (no track record shown). */
+export async function loadLedgerSummary(fetcher: typeof fetch = fetch, ledgerUrl = LEDGER_URL): Promise<LedgerSummary | null> {
+  if (!ledgerUrl) return null;
+  try {
+    return await getJson<LedgerSummary>(`${ledgerUrl}/summary.json`, fetcher);
+  } catch {
+    return null;
+  }
 }
