@@ -47,7 +47,7 @@ class FakeClob:
 def config(tmp):
     base = load_config()
     return replace(base, paths=PathsCfg(research_db=str(tmp / "r.duckdb"), scores_parquet=str(tmp / "s.parquet"),
-                                        snapshot_dir=str(tmp / "snap")))
+                                        snapshot_dir=str(tmp / "snap"), ledger_dir=str(tmp / "ledger")))
 
 
 async def test_a_sub_threshold_fresh_wallet_bet_is_evaluated_and_profiled(tmp_path):

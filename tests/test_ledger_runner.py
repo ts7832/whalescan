@@ -64,7 +64,7 @@ class FakeClob:
 def config(tmp):
     base = load_config()
     return replace(base, paths=PathsCfg(research_db=str(tmp / "r.duckdb"), scores_parquet=str(tmp / "s.parquet"),
-                                        snapshot_dir=str(tmp / "snap")))
+                                        snapshot_dir=str(tmp / "snap"), ledger_dir=str(tmp / "ledger")))
 
 
 async def window(cfg, apis, usdc=30_000.0, wallet="0xfresh1", price=0.40, tx="0x1"):

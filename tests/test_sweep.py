@@ -19,7 +19,7 @@ MARKET = Market("0xc", "Will X resign?", "x-resign", "x-resign", NOW + 30 * D, F
 def config(tmp):
     return replace(load_config(), paths=PathsCfg(research_db=str(tmp / "research.duckdb"),
                                                  scores_parquet=str(tmp / "scores.parquet"),
-                                                 snapshot_dir=str(tmp / "snapshot")))
+                                                 snapshot_dir=str(tmp / "snapshot"), ledger_dir=str(tmp / "ledger")))
 
 
 def fill(tx, ts, wallet="0xfresh", usdc=4_000.0, price=0.40):
