@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from whalescan.batch import Apis, WindowResult, _guarded
@@ -18,8 +20,10 @@ from whalescan.config import Config
 from whalescan.gate import Evaluation
 from whalescan.insider import account_age_days, near_miss_rule
 from whalescan.ledger import Ledger
+from whalescan.ledger_analysis import build_summary
 from whalescan.ledger_math import checkpoint_return, checkpoint_schedule, entry_cost, final_return
 from whalescan.models import Market, WalletProfile
+from whalescan.snapshot import write_json_atomic
 
 log = logging.getLogger(__name__)
 DAY = 86400
@@ -146,3 +150,27 @@ async def process_marks(ledger: Ledger, apis: Apis, cfg: Config, now: int) -> in
                                                                                  market)})
         processed += 1
     return processed
+
+
+@dataclass
+class LedgerReport:
+    logged: int = 0
+    marked: int = 0
+
+
+async def run_ledger_round(ledger_dir: Path, result: WindowResult, apis: Apis, cfg: Config, now: int) -> LedgerReport:
+    """One full ledger round for an already-computed evaluation window: log any new call, advance every
+    open call's marks, and rebuild summary.json. Idempotent — safe to call every sweep round."""
+    ledger = Ledger(ledger_dir)
+    logged = await record_calls(ledger, result, apis, cfg, now)
+    marked = await process_marks(ledger, apis, cfg, now)
+    write_json_atomic(ledger_dir / "summary.json", build_summary(ledger.calls(), ledger.marks(), cfg, now))
+    return LedgerReport(logged, marked)
+
+
+async def ledger_status(cfg: Config) -> dict[str, int]:
+    """Current ledger totals, for a quick CLI report without recomputing the whole summary."""
+    ledger = Ledger(cfg.path(cfg.paths.ledger_dir))
+    calls = ledger.calls()
+    open_n = len(ledger.open_calls())
+    return {"calls": len(calls), "open": open_n, "settled": len(calls) - open_n}

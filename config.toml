@@ -4,6 +4,7 @@
 research_db = "data/research.duckdb"
 scores_parquet = "data/scores.parquet"
 snapshot_dir = "data/snapshot"
+ledger_dir = "data/ledger"
 
 [http]
 rate_per_s = 5.0

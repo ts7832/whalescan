@@ -16,6 +16,7 @@ class PathsCfg:
     research_db: str
     scores_parquet: str
     snapshot_dir: str
+    ledger_dir: str = "data/ledger"
 
 
 @dataclass(frozen=True)

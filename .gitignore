@@ -7,6 +7,7 @@ data/*.duckdb
 data/*.duckdb.wal
 data/*.lock
 data/scores.parquet
+data/ledger/
 web/node_modules/
 web/dist/
 web/public/data/

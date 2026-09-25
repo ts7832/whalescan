@@ -14,6 +14,7 @@ import pandas as pd
 from whalescan.api.http import BlockedError
 from whalescan.batch import BatchReport, run_batch
 from whalescan.config import load_config
+from whalescan.ledger_runner import ledger_status
 from whalescan.live import Station
 from whalescan.sweep import run_sweep
 from whalescan.store import LockedError
@@ -50,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--publish", action="store_true", help="git commit + push data/snapshot afterwards")
     sw = sub.add_parser("sweep", help="15-minute insider sweep: every large fill since the last sweep")
     sw.add_argument("--publish", action="store_true", help="git commit + push data/snapshot afterwards")
+    sub.add_parser("ledger", help="run one sweep round (updates the Track Record ledger too) and report its state; "
+                                  "run standalone any time, including once to seed the ledger from live alerts")
     live = sub.add_parser("live", help="real-time station + dashboard on http://127.0.0.1:8765")
     live.add_argument("--host", default="127.0.0.1")
     live.add_argument("--port", type=int, default=8765)
@@ -78,6 +81,13 @@ def main(argv: list[str] | None = None) -> int:
             r = asyncio.run(run_sweep(cfg, publish=args.publish))
             print(f"sweep: {r.fills} fills read{'' if r.complete else ' (INCOMPLETE)'} · {r.insiders} insider "
                   f"alert(s) · {r.signals - r.insiders} sniper alert(s) · {r.contacts} contacts")
+            return 0
+        if args.cmd == "ledger":
+            r = asyncio.run(run_sweep(cfg))  # a sweep round also logs calls and advances marks
+            status = asyncio.run(ledger_status(cfg))
+            print(f"sweep: {r.fills} fills read · {r.insiders} insider alert(s) · {r.signals - r.insiders} "
+                  f"sniper alert(s)")
+            print(f"ledger: {status['calls']} calls · {status['open']} open · {status['settled']} settled")
             return 0
         if args.cmd == "score":
             report = asyncio.run(run_batch(cfg, stop_after_scoring=True))

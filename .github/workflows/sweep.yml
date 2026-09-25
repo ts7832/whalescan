@@ -2,7 +2,9 @@ name: insider-sweep
 # WHALESCAN's primary loop. GitHub drops many scheduled runs of small repos, so instead of relying on a
 # 15-minute cron, each job keeps sweeping every 15 minutes for ~5 hours. An hourly trigger only has to get
 # through once every few hours; a trigger that arrives while a job runs waits in the queue and takes over.
-# Each sweep publishes its alerts to the `data` branch, which the dashboard reads directly.
+# Each sweep publishes its alerts to the `data` branch, which the dashboard reads directly, and its
+# Track Record ledger (every call ever logged, and its outcome) to the `ledger` branch — a real,
+# append-only git history, never force-pushed (unlike `data`, which is a throwaway single commit).
 on:
   schedule:
     - cron: "7 * * * *"   # off-peak minute; hourly is plenty because every job runs for hours
@@ -31,11 +33,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           uv sync --locked
+          scripts/ledger-sync.sh pull
           stop=$((SECONDS + 320 * 60))
           while :; do
             began=$SECONDS
             if uv run whalescan sweep; then
               scripts/publish-data.sh || echo "::warning::publishing alerts failed; next round in 15 min"
+              scripts/ledger-sync.sh push || echo "::warning::publishing the ledger failed; next round in 15 min"
             else
               echo "::warning::sweep round failed; next round in 15 min"
             fi

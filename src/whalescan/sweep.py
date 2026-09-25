@@ -25,6 +25,7 @@ from whalescan.batch import Apis, _guarded, evaluate_window, git_publish, refres
 from whalescan.classify import Blocklist
 from whalescan.config import Config
 from whalescan.gate import ScoreBook
+from whalescan.ledger_runner import run_ledger_round
 from whalescan.scoring import SCORE_COLUMNS
 from whalescan.snapshot import write_json_atomic
 from whalescan.store import Store
@@ -78,6 +79,9 @@ async def run_sweep(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             book = ScoreBook.for_config(scores, cfg)
             result = await evaluate_window(apis, store, cfg, book, Blocklist(cfg.blocklist), now, now - window)
             signals, contacts = result.signals, result.contacts
+
+            # Track Record: log any new call this window surfaced and advance every open call's marks.
+            await run_ledger_round(cfg.path(cfg.paths.ledger_dir), result, apis, cfg, now)
     finally:
         if http is not None:
             await http.aclose()
