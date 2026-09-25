@@ -14,7 +14,7 @@ import math
 
 from whalescan.book import FollowQuote
 from whalescan.classify import Blocklist
-from whalescan.config import InsiderCfg
+from whalescan.config import InsiderCfg, LedgerCfg
 from whalescan.gate import Check, Evaluation, PositionEvent
 from whalescan.models import Market, WalletProfile
 
@@ -96,3 +96,36 @@ def evaluate_insider(ev: PositionEvent, profile: WalletProfile | None, market: M
         tier = "A" if (age is not None and age <= cfg.tier_a_age_days and ev.usdc >= cfg.tier_a_usdc) else "B"
     chase_limit = min(ev.price + cfg.max_slippage, cfg.price_max)  # a limit, not an edge estimate
     return Evaluation(ev, category, tuple(checks), status, tier, None, None, chase_limit, fee, quote, (ev.wallet,))
+
+
+def near_miss_rule(evaluation: Evaluation, profile: WalletProfile | None, insider_cfg: InsiderCfg,
+                   ledger_cfg: LedgerCfg) -> str | None:
+    """Which single insider rule `evaluation` just missed, if it's worth logging for the Track Record
+    (Track Record spec §1): I1 and I5 pass, I6 passes or is merely "no book yet" (the book is read when
+    the call is actually recorded), and exactly one of I2/I3/I4 fails, within the widened near-miss band.
+    Returns None for a full pass, a big miss, or an unknown/inconsistent age or market count (not "just
+    missed" — simply unmeasurable).
+    """
+    checks = {c.code: c for c in evaluation.checks}
+    if not checks["I1"].passed or not checks["I5"].passed:
+        return None
+    if not checks["I6"].passed and checks["I6"].detail != "NO BOOK":
+        return None
+    failed = [code for code in ("I2", "I3", "I4") if not checks[code].passed]
+    if len(failed) != 1:
+        return None
+    code = failed[0]
+    ev = evaluation.event
+
+    if code == "I2":
+        age = account_age_days(ev, profile)
+        if age is None:
+            return None
+        return "I2" if insider_cfg.max_age_days < age <= ledger_cfg.near_miss_age_max_days else None
+    if code == "I3":
+        n = profile.markets_traded if profile else None
+        if n is None:
+            return None
+        return "I3" if insider_cfg.max_markets < n <= ledger_cfg.near_miss_markets_max else None
+    # code == "I4"
+    return "I4" if ledger_cfg.near_miss_usdc_min <= ev.usdc < insider_cfg.min_usdc else None
