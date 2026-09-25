@@ -27,6 +27,13 @@ def is_insider_candidate(ev: PositionEvent, category: str, cfg: InsiderCfg) -> b
     return ev.side == "BUY" and ev.usdc >= cfg.min_usdc and category in cfg.categories
 
 
+def is_near_miss_candidate(ev: PositionEvent, category: str, insider_cfg: InsiderCfg, ledger_cfg: LedgerCfg) -> bool:
+    """Widened pre-filter used where the Track Record ledger needs near-misses judged too (Track Record
+    spec §1): the same shape as is_insider_candidate, but down to the near-miss size floor so a $5k-$10k
+    fresh-wallet bet still gets a profile lookup and an insider evaluation, even though it can't pass I4."""
+    return ev.side == "BUY" and ev.usdc >= ledger_cfg.near_miss_usdc_min and category in insider_cfg.categories
+
+
 def needs_insider_book(e: Evaluation) -> bool:
     failed = e.failed()
     return len(failed) == 1 and failed[0].code == "I6" and failed[0].detail == "NO BOOK"

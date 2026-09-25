@@ -23,8 +23,8 @@ from whalescan.book import follow_quote
 from whalescan.classify import Blocklist, wallet_flags
 from whalescan.config import ROOT, Config
 from whalescan.api.profiles import fetch_profile
-from whalescan.gate import GateContext, ScoreBook, aggregate, evaluate, needs_book
-from whalescan.insider import evaluate_insider, is_insider_candidate, needs_insider_book
+from whalescan.gate import Evaluation, GateContext, ScoreBook, aggregate, evaluate, needs_book
+from whalescan.insider import evaluate_insider, is_near_miss_candidate, needs_insider_book
 from whalescan.parsers import ParseError
 from whalescan.scoring import apply_history_window, prepare_positions, score_wallets
 from whalescan.snapshot import evaluation_json, whales_json, write_json_atomic, write_parquet_atomic
@@ -44,6 +44,19 @@ class Apis:
 
     def skipped(self) -> int:
         return self.data.skipped + self.gamma.skipped + self.clob.skipped
+
+
+@dataclass
+class WindowResult:
+    """Everything evaluate_window produced, so callers (the daily batch, the sweep, and the Track Record
+    ledger — record_calls) can build their own JSON or log calls without re-running the gate or re-fetching
+    profiles."""
+
+    signals: list[dict[str, Any]]
+    contacts: list[dict[str, Any]]
+    evaluations: list[Evaluation]
+    markets: Mapping[str, Any]
+    profiles: dict[str, Any]
 
 
 @dataclass
@@ -157,7 +170,7 @@ async def refresh_markets(apis: Apis, store: Store, now: int) -> None:
 
 
 async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFrame, blocklist: Blocklist,
-                        now: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                        now: int) -> WindowResult:
     g = cfg.gate
     since = now - int(g.signal_lookback_h * 3600)
     book = ScoreBook.for_config(scores, cfg)
@@ -179,9 +192,10 @@ async def build_signals(apis: Apis, store: Store, cfg: Config, scores: pd.DataFr
 
 
 async def evaluate_window(apis: Apis, store: Store, cfg: Config, book: ScoreBook, blocklist: Blocklist, now: int,
-                          since: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+                          since: int) -> WindowResult:
     """Gate every position event in the stored trades since `since`: snipers via G1–G7, everyone else via the
-    insider rules. Shared by the daily batch and the 15-minute sweep."""
+    insider rules (including near-misses, for the Track Record ledger). Shared by the daily batch, the
+    15-minute sweep, and (via .evaluations/.markets/.profiles) the ledger's record_calls."""
     g = cfg.gate
     events = aggregate(trades_from_frame(store.trades_frame(since_ts=since)), g.aggregation_window_s)
     markets = store.markets_by_id({e.condition_id for e in events})
@@ -194,8 +208,8 @@ async def evaluate_window(apis: Apis, store: Store, cfg: Config, book: ScoreBook
             if snap is not None:
                 evaluations[i] = evaluate(e.event, ctx, follow_quote(snap, g.follow_size_usdc))
 
-    evaluations = await _apply_insider_detector(apis, store, cfg, evaluations, markets, blocklist, now,
-                                                book.certified_wallets())
+    evaluations, profiles = await _apply_insider_detector(apis, store, cfg, evaluations, markets, blocklist, now,
+                                                           book.certified_wallets())
 
     names = {w: s.name for w, s in store.wallet_state().items()}
     signals = []
@@ -207,7 +221,7 @@ async def evaluate_window(apis: Apis, store: Store, cfg: Config, book: ScoreBook
     contacts = [evaluation_json(e, markets.get(e.event.condition_id), names, None)
                 for e in sorted(evaluations, key=lambda e: -e.event.last_ts)
                 if e.status not in ("SIGNAL", "INSIDER") and e.event.usdc >= g.min_usdc][:g.max_contacts]
-    return signals, contacts
+    return WindowResult(signals, contacts, evaluations, markets, profiles)
 
 
 async def _profiles(apis: Apis, store: Store, cfg: Config, wallets: set[str], now: int) -> dict[str, Any]:
@@ -223,16 +237,18 @@ async def _profiles(apis: Apis, store: Store, cfg: Config, wallets: set[str], no
     return store.profiles(wallets)
 
 
-async def _apply_insider_detector(apis: Apis, store: Store, cfg: Config, evaluations: list[Any],
+async def _apply_insider_detector(apis: Apis, store: Store, cfg: Config, evaluations: list[Evaluation],
                                   markets: Mapping[str, Any], blocklist: Blocklist, now: int,
-                                  proven: set[str]) -> list[Any]:
-    """Large news-market buys by wallets that aren't proven snipers: judge them as possible insiders instead."""
+                                  proven: set[str]) -> tuple[list[Evaluation], dict[str, Any]]:
+    """Large news-market buys by wallets that aren't proven snipers: judge them as possible insiders instead.
+    Widened to the near-miss size floor (not just the insider min_usdc) so the ledger can log near-misses too;
+    returns the updated evaluations plus every profile fetched, keyed by wallet."""
     ic = cfg.insider
     cands = [i for i, e in enumerate(evaluations)
              if e.status != "SIGNAL" and e.event.wallet not in proven and e.event.condition_id in markets
-             and is_insider_candidate(e.event, e.category, ic)]
+             and is_near_miss_candidate(e.event, e.category, ic, cfg.ledger)]
     if not cands:
-        return evaluations
+        return evaluations, {}
     profiles = await _profiles(apis, store, cfg, {evaluations[i].event.wallet for i in cands}, now)
     out = list(evaluations)
     for i in cands:
@@ -245,7 +261,7 @@ async def _apply_insider_detector(apis: Apis, store: Store, cfg: Config, evaluat
                 ie = evaluate_insider(e.event, profiles.get(e.event.wallet), m, e.category, ic, blocklist,
                                       follow_quote(snap, cfg.gate.follow_size_usdc), now)
         out[i] = ie
-    return out
+    return out, profiles
 
 
 async def maybe_validate(apis: Apis, store: Store, cfg: Config, eligible: pd.DataFrame, flags: pd.Series,
@@ -360,7 +376,8 @@ async def run_batch(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             if stop_after_scoring:
                 return report
 
-            signals, contacts = await build_signals(apis, store, cfg, scores, blocklist, now)
+            window = await build_signals(apis, store, cfg, scores, blocklist, now)
+            signals, contacts = window.signals, window.contacts
             validation = None
             if not skip_validation:
                 validation = await maybe_validate(apis, store, cfg, eligible, flags, scores, blocklist, now,

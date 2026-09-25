@@ -76,8 +76,8 @@ async def run_sweep(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             scores_path = out / "scores.parquet"
             scores = pd.read_parquet(scores_path) if scores_path.exists() else pd.DataFrame(columns=SCORE_COLUMNS)
             book = ScoreBook.for_config(scores, cfg)
-            signals, contacts = await evaluate_window(apis, store, cfg, book, Blocklist(cfg.blocklist), now,
-                                                      now - window)
+            result = await evaluate_window(apis, store, cfg, book, Blocklist(cfg.blocklist), now, now - window)
+            signals, contacts = result.signals, result.contacts
     finally:
         if http is not None:
             await http.aclose()
