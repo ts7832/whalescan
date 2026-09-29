@@ -21,7 +21,8 @@ MARKET = Market("0xc", "Will X happen?", "x-happen", "x-happen", NOW + 30 * DAY,
 def config(tmp):
     base = load_config()
     return replace(base, paths=PathsCfg(research_db=str(tmp / "r.duckdb"), scores_parquet=str(tmp / "s.parquet"),
-                                        snapshot_dir=str(tmp / "snap"), ledger_dir=str(tmp / "ledger")))
+                                        snapshot_dir=str(tmp / "snap"), ledger_dir=str(tmp / "ledger"),
+                                        history_db=str(tmp / "history.duckdb")))
 
 
 class FakeData:

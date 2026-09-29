@@ -17,6 +17,7 @@ class PathsCfg:
     scores_parquet: str
     snapshot_dir: str
     ledger_dir: str
+    history_db: str
 
 
 @dataclass(frozen=True)

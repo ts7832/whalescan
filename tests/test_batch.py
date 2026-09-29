@@ -22,7 +22,8 @@ def config(tmp):
     base = replace(base, gate=replace(base.gate, skill_mode="certified"))
     return replace(base, paths=PathsCfg(research_db=str(tmp / "research.duckdb"),
                                                  scores_parquet=str(tmp / "scores.parquet"),
-                                                 snapshot_dir=str(tmp / "snapshot"), ledger_dir=str(tmp / "ledger")))
+                                                 snapshot_dir=str(tmp / "snapshot"), ledger_dir=str(tmp / "ledger"),
+                                        history_db=str(tmp / "history.duckdb")))
 
 
 class FakeData:
