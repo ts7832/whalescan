@@ -135,6 +135,26 @@ class LedgerCfg:
 
 
 @dataclass(frozen=True)
+class StudyCfg:
+    lookback_days: int
+    history_max_age_days: float
+    entry_delays_min: tuple[int, ...]
+    headline_delay_min: int
+    half_spread: float
+    train_fraction: float
+    min_wallets: int
+    bootstrap: int
+    seed: int
+    bankroll: float
+    kelly_fraction: float
+    shrink_k: float
+    max_bet_fraction: float
+    max_event_fraction: float
+    max_exposure_fraction: float
+    max_whale_share: float
+
+
+@dataclass(frozen=True)
 class BlocklistCfg:
     slug_patterns: tuple[str, ...]
     min_market_volume: float
@@ -157,6 +177,7 @@ class Config:
     sweep: SweepCfg
     insider: InsiderCfg
     ledger: LedgerCfg
+    study: StudyCfg
     validation: ValidationCfg
     blocklist: BlocklistCfg
     categories: CategoriesCfg
@@ -194,6 +215,7 @@ def load_config(path: Path | None = None) -> Config:
         sweep=_section(SweepCfg, "sweep", raw["sweep"]),
         insider=_section(InsiderCfg, "insider", raw["insider"]),
         ledger=_section(LedgerCfg, "ledger", raw["ledger"]),
+        study=_section(StudyCfg, "study", raw["study"]),
         validation=_section(ValidationCfg, "validation", raw["validation"]),
         blocklist=_section(BlocklistCfg, "blocklist", raw["blocklist"]),
         categories=CategoriesCfg(
