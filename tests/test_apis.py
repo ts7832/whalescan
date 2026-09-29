@@ -127,9 +127,35 @@ async def test_gamma_queries_closed_first_then_open_for_the_rest():
     markets = await GammaApi(http(handler)).markets(ids + ["0X1"])
     assert len(markets) == 250
     assert markets["0x2"].closed and not markets["0x3"].closed
-    # 250 ids -> closed pass in chunks of 100; the 125 odd (open) ids left -> open pass in chunks of 100
-    assert calls == [(100, "true", "true", "100"), (100, "true", "true", "100"), (50, "true", "true", "100"),
-                     (100, "false", "true", "100"), (25, "false", "true", "100")]
+    # 250 ids -> closed pass in chunks of 100; the 125 odd (open) ids left -> open pass in chunks of 100.
+    # Chunks within a pass run concurrently, so only the pass order is fixed.
+    assert sorted(calls[:3]) == [(50, "true", "true", "100"), (100, "true", "true", "100"),
+                                 (100, "true", "true", "100")]
+    assert sorted(calls[3:]) == [(25, "false", "true", "100"), (100, "false", "true", "100")]
+
+
+async def test_gamma_fetches_chunks_concurrently_and_logs_progress(caplog):
+    # 1.16M markets fetched one request at a time is what ran the daily job past GitHub's time limit.
+    import asyncio
+    import logging
+
+    state = {"in_flight": 0, "peak": 0}
+
+    async def handler(request):
+        state["in_flight"] += 1
+        state["peak"] = max(state["peak"], state["in_flight"])
+        await asyncio.sleep(0.005)
+        state["in_flight"] -= 1
+        ids = request.url.params.get_list("condition_ids")
+        closed = request.url.params["closed"] == "true"
+        return httpx.Response(200, json=[{"conditionId": i, "closed": True, "outcomePrices": "[\"1\",\"0\"]"}
+                                         for i in ids] if closed else [])
+
+    caplog.set_level(logging.INFO, logger="whalescan.api.gamma")
+    markets = await GammaApi(http(handler)).markets([f"0x{i}" for i in range(3000)])
+    assert len(markets) == 3000
+    assert state["peak"] > 1
+    assert "market metadata: 30/30 chunks" in caplog.text
 
 
 async def test_gamma_skips_malformed_rows():
@@ -225,3 +251,15 @@ async def test_wallet_profile_tolerates_unknown_accounts():
     h = http(handler)
     p = await fetch_profile(GammaApi(h), DataApi(h), "0xw", now=5)
     assert p.created_ts is None and p.markets_traded == 0
+
+
+async def test_gamma_block_propagates_as_itself_through_concurrent_chunks():
+    from whalescan.api.http import BlockedError
+
+    def handler(request):
+        if "0x5" in request.url.params.get_list("condition_ids"):
+            return httpx.Response(403, headers={"cf-mitigated": "challenge"}, text="blocked")
+        return httpx.Response(200, json=[])
+
+    with pytest.raises(BlockedError):
+        await GammaApi(http(handler)).markets([f"0x{i}" for i in range(1000)])

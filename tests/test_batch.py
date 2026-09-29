@@ -26,10 +26,12 @@ def config(tmp):
 
 
 class FakeData:
-    def __init__(self, positions, trades, *, block=False, redeemable=None, truncated=()):
+    def __init__(self, positions, trades, *, block=False, redeemable=None, truncated=(), traded=None):
         self.positions, self.rows, self.block, self.skipped = positions, trades, block, 0
         self.redeemable = redeemable or {}
         self.truncated = set(truncated)
+        self.traded = traded or {}  # markets_traded overrides; None = the API didn't answer
+        self.fetched: list[str] = []  # wallets whose closed-position history was requested
 
     async def redeemable_positions(self, wallet):
         return PositionHistory(self.redeemable.get(wallet, []), True)
@@ -40,11 +42,16 @@ class FakeData:
         return [LeaderboardEntry(w, i + 1, 1e6, 1e5, f"name{i}") for i, w in enumerate(sorted(self.positions))]
 
     async def closed_positions(self, wallet, *, since_ts=None):
+        self.fetched.append(wallet)
         rows = [p for p in self.positions.get(wallet, []) if since_ts is None or p.ts >= since_ts]
         return PositionHistory(rows, True, truncated=wallet in self.truncated and since_ts is None)
 
     async def markets_traded(self, wallet):
-        return 1 if wallet.startswith("0xfresh") else 500
+        if wallet in self.traded:
+            return self.traded[wallet]
+        if wallet.startswith("0xfresh"):
+            return 1
+        return len(self.positions[wallet]) if wallet in self.positions else 500
 
     async def trades(self, *, user=None, min_usdc=None, since_ts=None):
         rows = [t for t in self.rows if (user is None or t.wallet == user)
@@ -380,3 +387,39 @@ def test_cli_sweep_runs_the_insider_sweep(monkeypatch, capsys):
     monkeypatch.setattr(cli, "run_sweep", fake_sweep)
     assert cli.main(["sweep", "--publish"]) == 0
     assert seen == {"publish": True} and "1 insider" in capsys.readouterr().out
+
+
+async def test_hyperactive_wallets_are_skipped_before_their_history_is_fetched(tmp_path, caplog):
+    # A sniper trades rarely (at most [sniper].max_positions bets). A wallet that has traded thousands of markets
+    # can never qualify, and fetching its history plus metadata for every market it touched is what ran the daily
+    # job past GitHub's time limit (1.16M markets). Wallets whose count is unknown are skipped too.
+    import logging
+
+    caplog.set_level(logging.INFO, logger="whalescan.batch")
+    positions, markets, trades = world()
+    data = FakeData(positions, trades, traded={"0xnull0": 5000, "0xnull1": None})
+    report = await run_batch(config(tmp_path), apis=Apis(data, FakeGamma(markets), FakeClob()), now=NOW,
+                             skip_validation=True)
+    assert report.wallets_scanned == 29
+    assert "0xnull0" not in data.fetched and "0xnull1" not in data.fetched
+    assert "0xwhale" in data.fetched and report.certified_wallets == 1
+    assert "skipped 2 wallets (1 trade too often, 1 unknown)" in caplog.text
+
+
+async def test_data_for_hyperactive_and_long_stale_wallets_is_dropped(tmp_path):
+    # Positions of wallets that will never be scored again must not keep driving market refreshes or
+    # growing the research database (1.4 GB locally before this).
+    from whalescan.store import Store
+
+    positions, markets, trades = world()
+    await run(tmp_path, (positions, markets, trades), skip_validation=True)
+    cfg = config(tmp_path)
+    later = NOW + int((cfg.universe.max_wallet_age_days + 1) * DAY)
+    gone = positions.pop("0xnull2")  # left the leaderboards and was never refreshed again
+    assert gone
+    data = FakeData(positions, trades, traded={"0xnull0": 5000})
+    await run_batch(cfg, apis=Apis(data, FakeGamma(markets), FakeClob()), now=later, skip_validation=True)
+    with Store(cfg.path(cfg.paths.research_db)) as store:
+        kept = set(store.positions_frame()["wallet"])
+    assert "0xnull0" not in kept and "0xnull2" not in kept
+    assert "0xwhale" in kept and "0xnull3" in kept

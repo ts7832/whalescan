@@ -26,6 +26,9 @@ leaderboard_pages = 10
 large_trade_min_usdc = 5000
 large_trade_lookback_days = 30
 max_wallet_age_days = 14
+# A sniper bets rarely ([sniper].max_positions resolved bets). Wallets that have traded more markets than this
+# can never qualify, so their histories are not fetched: they made the daily job request 1.16M markets.
+max_markets_traded = 200
 
 [scoring]
 n_sims = 100000

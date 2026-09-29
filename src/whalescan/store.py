@@ -202,6 +202,23 @@ class Store:
                 """INSERT INTO wallets (wallet, name) VALUES (?, ?)
                    ON CONFLICT (wallet) DO UPDATE SET name = excluded.name""", rows)
 
+    def stale_wallets(self, fetched_before: int) -> set[str]:
+        """Wallets whose history was fetched, but not since `fetched_before`: they are no longer scored."""
+        rows = self.con.execute("SELECT wallet FROM wallets WHERE fetched_at IS NOT NULL AND fetched_at < ?",
+                                [fetched_before]).fetchall()
+        return {r[0] for r in rows}
+
+    def drop_positions(self, wallets: Iterable[str]) -> int:
+        """Forget the stored history of wallets that will never be scored again, so their markets stop being
+        refreshed and the database stops growing. Their wallets rows (names) are kept; if one returns to the
+        universe its history is simply fetched in full again."""
+        ids = sorted(set(wallets))
+        if not ids:
+            return 0
+        before = self.con.execute("SELECT count(*) FROM positions").fetchone()[0]
+        self.con.execute("DELETE FROM positions WHERE list_contains(?, wallet)", [ids])
+        return int(before - self.con.execute("SELECT count(*) FROM positions").fetchone()[0])
+
     def wallet_state(self) -> dict[str, WalletState]:
         rows = self.con.execute(
             """SELECT w.wallet, w.fetched_at, w.complete, p.max_ts, w.name FROM wallets w

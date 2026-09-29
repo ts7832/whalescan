@@ -121,10 +121,39 @@ async def discover_universe(apis: Apis, store: Store, cfg: Config, now: int) -> 
     for wallet, _ in sorted(volume.items(), key=lambda kv: -kv[1]):
         sources.setdefault(wallet, "large_trades")
     store.set_wallet_names(names)
-    universe = dict(list(sources.items())[:u.max_wallets])
+
+    too_active, unknown = await screen_activity(apis, list(sources), u.max_markets_traded, cfg.http.concurrency)
+    if too_active or unknown:
+        log.info("universe: skipped %d wallets (%d trade too often, %d unknown)", len(too_active | unknown),
+                 len(too_active), len(unknown))
+    universe = dict([(w, s) for w, s in sources.items() if w not in too_active | unknown][:u.max_wallets])
     log.info("universe: %d wallets (%d from leaderboards, %d large trades seen)", len(universe),
              sum(1 for s in universe.values() if s == "leaderboard"), len(page.trades))
+
+    stale = store.stale_wallets(now - int(u.max_wallet_age_days * 86400)) - universe.keys()
+    dropped = store.drop_positions(too_active | stale)
+    if dropped:
+        log.info("dropped %d stored positions of %d wallets that are no longer scored", dropped,
+                 len(too_active | stale))
     return universe
+
+
+async def screen_activity(apis: Apis, wallets: list[str], max_markets: int,
+                          concurrency: int) -> tuple[set[str], set[str]]:
+    """(too_active, unknown): wallets that have traded more than `max_markets` markets, and wallets whose count
+    the API didn't return. A sniper bets rarely, so neither is worth fetching a full history for; one cheap
+    /traded call per wallet saves hundreds of history pages and metadata for thousands of markets."""
+    counts: dict[str, int | None] = {}
+    sem = asyncio.Semaphore(concurrency)
+
+    async def one(wallet: str) -> None:
+        async with sem:
+            counts[wallet] = await _guarded(apis.data.markets_traded(wallet), f"markets traded {wallet}")
+
+    await _run_all(one(w) for w in wallets)
+    too_active = {w for w, n in counts.items() if n is not None and n > max_markets}
+    unknown = {w for w, n in counts.items() if n is None}
+    return too_active, unknown
 
 
 async def refresh_positions(apis: Apis, store: Store, wallets: Mapping[str, str], concurrency: int, now: int) -> int:

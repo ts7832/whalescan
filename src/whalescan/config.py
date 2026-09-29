@@ -37,6 +37,7 @@ class UniverseCfg:
     large_trade_min_usdc: float
     large_trade_lookback_days: int
     max_wallet_age_days: float
+    max_markets_traded: int
 
 
 @dataclass(frozen=True)

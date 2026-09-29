@@ -20,26 +20,30 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 330
+    # Pinned: ubuntu-latest moves to Ubuntu 26 on 2026-10-19, and an unattended compiler jump could break the C++ build.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
       - name: Restore research database
         if: github.event_name != 'push' && !inputs.skip_batch
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/research.duckdb
           key: research-${{ github.run_id }}
           restore-keys: research-
       - name: Run batch
         if: github.event_name != 'push' && !inputs.skip_batch
+        # Shorter than the job: if a run is slow the step times out but the job survives, so "Save research
+        # database" still runs and the next day resumes incrementally instead of starting from zero again.
+        timeout-minutes: 150
         run: |
           uv sync --locked
           uv run whalescan batch
       - name: Save research database
         if: always() && github.event_name != 'push' && !inputs.skip_batch
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/research.duckdb
           key: research-${{ github.run_id }}
@@ -54,7 +58,7 @@ jobs:
           # main may have moved during a multi-hour run: rebase onto it and retry the push
           for i in 1 2 3; do git pull --rebase origin main && git push && exit 0; sleep 10; done
           exit 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
       - name: Publish fresh alerts to the data branch
         if: github.event_name != 'push' && !inputs.skip_batch
@@ -67,14 +71,14 @@ jobs:
           VITE_ALERTS_URL: https://raw.githubusercontent.com/${{ github.repository }}/data/snapshot
           VITE_LEDGER_URL: https://raw.githubusercontent.com/${{ github.repository }}/ledger
         run: npm ci && npm run build
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with: { path: web/dist }
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

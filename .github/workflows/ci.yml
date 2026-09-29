@@ -4,23 +4,23 @@ on:
   pull_request:
 jobs:
   cpp:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: scripts/test-cpp.sh
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
       - run: uv sync --locked
       - run: uv run pytest -q
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults: { run: { working-directory: web } }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: npm, cache-dependency-path: web/package-lock.json }
       - run: npm ci
       - run: npm test
