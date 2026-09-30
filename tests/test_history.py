@@ -138,3 +138,19 @@ async def test_run_history_opens_the_configured_database(tmp_path):
                                       history_db=str(tmp_path / "history.duckdb"), archive_dir=str(tmp_path / "archive")))
     rep = await run_history(cfg, apis=world(), now=NOW)
     assert rep.markets == 1 and (tmp_path / "history.duckdb").exists()
+
+
+async def test_long_phases_log_their_progress(caplog):
+    import logging
+
+    from whalescan.history import _bounded
+
+    done = []
+
+    async def work(i):
+        done.append(i)
+
+    caplog.set_level(logging.INFO, logger="whalescan.history")
+    await _bounded(range(250), work, 8, label="fills")
+    assert len(done) == 250
+    assert "history: fills 250/250" in caplog.text and "history: fills 25/250" in caplog.text

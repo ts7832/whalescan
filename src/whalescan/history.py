@@ -65,14 +65,24 @@ def _sample_key(event_id: str, seed: int) -> str:
     return hashlib.sha256(f"{seed}:{event_id}".encode()).hexdigest()
 
 
-async def _bounded(items: Iterable[Any], fn: Callable[[Any], Awaitable[None]], concurrency: int) -> None:
+async def _bounded(items: Iterable[Any], fn: Callable[[Any], Awaitable[None]], concurrency: int, *,
+                   label: str = "") -> None:
+    """Run `fn` over `items`, at most `concurrency` at a time, logging progress every 10% (long phases take
+    tens of minutes; a silent one is indistinguishable from a hung one)."""
+    work = list(items)
     sem = asyncio.Semaphore(concurrency)
+    step = max(1, len(work) // 10)
+    done = 0
 
     async def one(item: Any) -> None:
+        nonlocal done
         async with sem:
             await fn(item)
+        done += 1
+        if label and (done % step == 0 or done == len(work)):
+            log.info("history: %s %d/%d", label, done, len(work))
 
-    await _run_all(one(i) for i in items)
+    await _run_all(one(i) for i in work)
 
 
 async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) -> HistoryReport:
@@ -106,7 +116,7 @@ async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) 
 
     todo = store.markets_needing_fills(now)
     log.info("history: reading fills of %d markets", len(todo))
-    await _bounded(todo, fills, cfg.http.concurrency)
+    await _bounded(todo, fills, cfg.http.concurrency, label="fills")
 
     # 3. Account creation dates of every wallet that placed a big buy (age at the bet: no look-ahead).
     events = study_events(store, cfg)
@@ -120,7 +130,7 @@ async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) 
         rep.profiles += 1
 
     log.info("history: %d big buys by %d wallets; %d profiles to fetch", len(big), len(wallets), len(missing))
-    await _bounded(missing, profile, cfg.http.concurrency)
+    await _bounded(missing, profile, cfg.http.concurrency, label="profiles")
 
     # 4. Full trade histories of young wallets, to count the markets they had traded before each bet.
     profiles = store.profiles(wallets)
@@ -136,7 +146,7 @@ async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) 
         store.mark_wallet_history(wallet, now)
         rep.wallet_histories += 1
 
-    await _bounded(todo_wallets, history, cfg.http.concurrency)
+    await _bounded(todo_wallets, history, cfg.http.concurrency, label="wallet histories")
 
     # 5. Minute prices after each scoreable bet: every young wallet's, plus a fixed sample of the rest (BASELINE).
     closed_ids = store.study_market_ids(closed_only=True)
@@ -157,7 +167,7 @@ async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) 
         rep.price_windows += 1
 
     log.info("history: %d price windows to fetch", len(windows))
-    await _bounded(windows, prices, cfg.http.concurrency)
+    await _bounded(windows, prices, cfg.http.concurrency, label="price windows")
     return rep
 
 
