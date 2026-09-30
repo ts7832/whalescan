@@ -21,6 +21,7 @@ def mk(question, *, tags=("Politics",), volume=1e6, closed=False, end_ts=NOW + 3
 
 @pytest.mark.parametrize("question,expected", [
     ("Will MicroStrategy (MSTR) hit (HIGH) $125 Week of August 17 2026?", True),
+    ("Will BTC hit $150,000 by 2027?", True),
     ("Will Bitcoin price close above $150,000 by 2027?", True),
     ("Will ETH trade below $2,000 in September?", True),
     ("Bitcoin Up or Down - September 30, 8AM ET", True),

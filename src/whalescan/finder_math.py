@@ -14,7 +14,7 @@ from whalescan.models import Market
 # excluded even when tagged Crypto/Business, so a corporate-announcement market (e.g. "will MicroStrategy
 # announce a purchase") stays covered while "will MSTR hit $125" does not.
 _PRICE_MARKET_RE = re.compile(
-    r"\b(up or down|above|below|reach(es)?|hit \(?(high|low)\)?|dip to|price of|close (above|below)|"
+    r"\b(up or down|above|below|reach(es)?|hit\b|dip to|price of|close (above|below)|"
     r"trade (above|below))\b", re.IGNORECASE)
 
 

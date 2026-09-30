@@ -96,13 +96,20 @@ async def test_profiles_only_for_big_buyers_and_histories_only_for_young_wallets
         assert h.markets_traded_before("0xfresh", NOW - 20 * DAY) == 1  # the earlier 0xother trade
 
 
+def _study_windows(calls, cfg):
+    # Insider Finder now also calls price_window on this shared fake for any covered market (e.g. "0xpol"), with
+    # its own 30h span; the evidence study's own windows are the shorter, distinct span asserted here.
+    span = (max(cfg.study.entry_delays_min) + 10) * 60
+    return [c for c in calls if c[2] - c[1] == span]
+
+
 async def test_price_windows_start_at_the_signal_and_cover_the_longest_delay(tmp_path):
     apis = world()
     cfg = replace(CFG, study=replace(CFG.study, baseline_sample=0))
     with HistoryStore(tmp_path / "h.duckdb") as h:
         await build_history(apis, h, cfg, NOW)
-        assert apis.clob.windows == [("0xpol-y", NOW - 20 * DAY, NOW - 20 * DAY + (max(cfg.study.entry_delays_min)
-                                                                                    + 10) * 60)]
+        span = (max(cfg.study.entry_delays_min) + 10) * 60
+        assert _study_windows(apis.clob.windows, cfg) == [("0xpol-y", NOW - 20 * DAY, NOW - 20 * DAY + span)]
         assert h.price_after("0xpol-y", NOW - 20 * DAY, max_wait_s=120) == 0.41
 
 
@@ -110,7 +117,7 @@ async def test_a_baseline_sample_of_older_wallets_is_priced_too(tmp_path):
     apis = world()
     with HistoryStore(tmp_path / "h.duckdb") as h:
         await build_history(apis, h, CFG, NOW)  # the default sample is large enough to include 0xold's bet
-    assert sorted(t0 for _, t0, _ in apis.clob.windows) == [NOW - 20 * DAY, NOW - 19 * DAY]
+    assert sorted(t0 for _, t0, _ in _study_windows(apis.clob.windows, CFG)) == [NOW - 20 * DAY, NOW - 19 * DAY]
 
 
 def test_cli_history_builds_the_dataset_and_reports_what_it_fetched(monkeypatch, capsys):
