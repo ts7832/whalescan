@@ -19,6 +19,12 @@ ALTER TABLE h_wallet_history ADD COLUMN IF NOT EXISTS complete BOOLEAN;
 ALTER TABLE h_wallet_history ADD COLUMN IF NOT EXISTS truncated BOOLEAN;
 CREATE TABLE IF NOT EXISTS h_prices (asset VARCHAR, ts BIGINT, price DOUBLE, PRIMARY KEY (asset, ts));
 CREATE TABLE IF NOT EXISTS h_price_windows (asset VARCHAR, t0 BIGINT, PRIMARY KEY (asset, t0));
+-- Insider Finder's own price series, kept separate from h_prices: the evidence study's windows are short and
+-- fine-grained (~70 min, near the signal); the Finder's are long and coarse (30h at 10-min fidelity). Sharing
+-- one table would let the study's denser data silently fill gaps in a Finder window that was never fetched
+-- (turning "unknown" into a false miss) and would let the Finder's writes change the study's own already-
+-- reviewed numbers on a later re-run.
+CREATE TABLE IF NOT EXISTS h_finder_prices (asset VARCHAR, ts BIGINT, price DOUBLE, PRIMARY KEY (asset, ts));
 -- Insider Finder's own 30h/10min slot windows: a separate table (not a wider key on h_price_windows) so the
 -- already-built evidence-study database never needs its primary key altered.
 CREATE TABLE IF NOT EXISTS h_finder_windows (asset VARCHAR, slot_ts BIGINT, PRIMARY KEY (asset, slot_ts));
@@ -110,6 +116,23 @@ class HistoryStore(Store):
     def has_price_window(self, asset: str, t0: int) -> bool:
         return self.con.execute("SELECT 1 FROM h_price_windows WHERE asset = ? AND t0 = ?",
                                 [asset, t0]).fetchone() is not None
+
+    def upsert_finder_prices(self, asset: str, points: Iterable[tuple[int, float]]) -> None:
+        rows = [(asset, int(t), float(p)) for t, p in points]
+        if rows:
+            self.con.executemany("INSERT OR REPLACE INTO h_finder_prices VALUES (?, ?, ?)", rows)
+
+    def finder_price_after(self, asset: str, ts: int, *, max_wait_s: int) -> float | None:
+        row = self.con.execute(
+            "SELECT price FROM h_finder_prices WHERE asset = ? AND ts >= ? AND ts <= ? ORDER BY ts LIMIT 1",
+            [asset, ts, ts + max_wait_s]).fetchone()
+        return None if row is None else float(row[0])
+
+    def finder_points_after(self, asset: str, *, since_exclusive: int, until_inclusive: int) -> list[tuple[int, float]]:
+        rows = self.con.execute(
+            "SELECT ts, price FROM h_finder_prices WHERE asset = ? AND ts > ? AND ts <= ? ORDER BY ts",
+            [asset, since_exclusive, until_inclusive]).fetchall()
+        return [(int(t), float(p)) for t, p in rows]
 
     def mark_finder_window(self, asset: str, slot_ts: int) -> None:
         self.con.execute("INSERT OR REPLACE INTO h_finder_windows VALUES (?, ?)", [asset, slot_ts])

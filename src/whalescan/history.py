@@ -211,7 +211,7 @@ async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) 
                              f"finder prices {asset}")
         if pts is None:
             return
-        store.upsert_prices(asset, [(p.ts, p.price) for p in pts])
+        store.upsert_finder_prices(asset, [(p.ts, p.price) for p in pts])
         store.mark_finder_window(asset, slot_ts)
         rep.finder_windows += 1
 

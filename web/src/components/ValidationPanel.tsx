@@ -57,11 +57,11 @@ function WalkForwardBody({ validation }: { validation: Validation | null }) {
   );
 }
 
-const KIND_LABEL = { INSIDER: 'INSIDER', SNIPER: 'SNIPER', NEAR_MISS: 'NEAR MISS' } as const;
+const KIND_LABEL = { INSIDER: 'INSIDER', SNIPER: 'SNIPER', NEAR_MISS: 'NEAR MISS', CONFIRMED: 'CONFIRMED' } as const;
 
 function TrackRecordBody({ ledger }: { ledger: LedgerSummary | null }) {
   if (!ledger) return <p className="empty">TRACK RECORD NOT PUBLISHED YET</p>;
-  const kinds = (['INSIDER', 'SNIPER', 'NEAR_MISS'] as const).map((k) => [k, ledger.by_kind[k]] as const);
+  const kinds = (['INSIDER', 'SNIPER', 'NEAR_MISS', 'CONFIRMED'] as const).map((k) => [k, ledger.by_kind[k]] as const);
   return (
     <>
       <div className="panel-right" style={{ marginBottom: 8 }}>{fmtDate(ledger.generated_at)} · {ledger.totals.calls} CALLS · {ledger.totals.open} OPEN</div>

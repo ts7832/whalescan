@@ -25,8 +25,7 @@ from whalescan.archive import archive_round
 from whalescan.batch import Apis, _guarded, evaluate_window, git_publish, refresh_markets
 from whalescan.classify import Blocklist
 from whalescan.config import Config
-from whalescan.finder import confirmed_wallets
-from whalescan.finder_math import is_covered
+from whalescan.finder import confirmed_wallets, is_confirmed_alert
 from whalescan.gate import ScoreBook
 from whalescan.ledger import Ledger
 from whalescan.ledger_runner import run_ledger_round
@@ -102,11 +101,13 @@ async def run_sweep(cfg: Config, *, apis: Apis | None = None, now: int | None = 
                     badged = []
                     for e in result.evaluations:
                         m = result.markets.get(e.event.condition_id)
-                        if (e.event.wallet in confirmed and e.event.side == "BUY"
-                                and e.event.usdc >= cfg.finder.min_usdc and m is not None
-                                and is_covered(m, cfg, fblocklist)):
+                        if is_confirmed_alert(e, m, confirmed, cfg, fblocklist):
                             j = evaluation_json(e, m, names, None)
+                            j["id"] = f"{e.event.id}:CONFIRMED"
                             j["kind"] = "CONFIRMED"
+                            j["status"] = "SIGNAL"
+                            j["checks"] = [{"code": "CONFIRMED", "passed": True,
+                                           "detail": "watchlist wallet: an earlier call already settled as a win"}]
                             badged.append(j)
                     signals = badged + signals
             except Exception:  # noqa: BLE001

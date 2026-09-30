@@ -69,3 +69,19 @@ def test_price_windows_are_remembered(tmp_path):
         assert not h.has_price_window("tok", NOW)
         h.mark_price_window("tok", NOW)
         assert h.has_price_window("tok", NOW)
+
+
+def test_finder_prices_are_stored_separately_from_the_evidence_studys_own_prices(tmp_path):
+    with HistoryStore(tmp_path / "h.duckdb") as h:
+        h.upsert_prices("tok", [(NOW + 60, 0.30)])  # the evidence study's own (sparser) window
+        assert h.finder_price_after("tok", NOW + 60, max_wait_s=120) is None  # never leaks across tables
+        h.upsert_finder_prices("tok", [(NOW + 120, 0.40)])
+        assert h.finder_price_after("tok", NOW + 120, max_wait_s=120) == 0.40
+        assert h.price_after("tok", NOW + 120, max_wait_s=120) is None  # and not the other way either
+
+
+def test_finder_prices_after_returns_every_point_in_a_window(tmp_path):
+    with HistoryStore(tmp_path / "h.duckdb") as h:
+        h.upsert_finder_prices("tok", [(NOW + 60, 0.30), (NOW + 600, 0.40), (NOW + 3600, 0.50)])
+        pts = h.finder_points_after("tok", since_exclusive=NOW + 60, until_inclusive=NOW + 600)
+        assert pts == [(NOW + 600, 0.40)]  # strictly after the floor, up to and including the ceiling

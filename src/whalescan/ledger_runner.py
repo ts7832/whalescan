@@ -18,8 +18,7 @@ from whalescan.batch import Apis, WindowResult, _guarded
 from whalescan.book import follow_quote
 from whalescan.classify import Blocklist
 from whalescan.config import Config
-from whalescan.finder import confirmed_wallets
-from whalescan.finder_math import is_covered
+from whalescan.finder import confirmed_wallets, is_confirmed_alert
 from whalescan.gate import Evaluation
 from whalescan.insider import account_age_days, near_miss_rule
 from whalescan.ledger import Ledger
@@ -125,9 +124,7 @@ async def record_calls(ledger: Ledger, result: WindowResult, apis: Apis, cfg: Co
         profile = result.profiles.get(e.event.wallet)
         market = result.markets.get(e.event.condition_id)
 
-        if (confirmed and e.event.wallet in confirmed and e.event.side == "BUY"
-                and e.event.usdc >= cfg.finder.min_usdc and market is not None
-                and is_covered(market, cfg, blocklist)
+        if (confirmed and is_confirmed_alert(e, market, confirmed, cfg, blocklist)
                 and await _record_one(ledger, "CONFIRMED", None, e, profile, market, apis, cfg, now)):
             logged += 1
 

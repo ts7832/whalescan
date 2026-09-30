@@ -13,9 +13,17 @@ from whalescan.models import Market
 # Stock/crypto price-threshold markets ("hit $X", "above/below $X", "up or down") are noise, not insider signal —
 # excluded even when tagged Crypto/Business, so a corporate-announcement market (e.g. "will MicroStrategy
 # announce a purchase") stays covered while "will MSTR hit $125" does not.
+#
+# A bare "hit"/"reach(es)"/"above"/"below" also matches ordinary insider-category questions that happen to
+# contain those common words ("hit Iran", "reach a ceasefire", "approval above 45%"), wrongly excluding core
+# geopolitics/politics/economy markets (found by review; the original regex over-matched). Every branch here is
+# anchored to an explicit price signal instead — a dollar amount, "(high|low)", "all-time high"/"ATH", or
+# "up or down" — so a plain word without one of those never counts as a price-threshold market.
+_DOLLAR = r"\$\s?[\d,]"
 _PRICE_MARKET_RE = re.compile(
-    r"\b(up or down|above|below|reach(es)?|hit\b|dip to|price of|close (above|below)|"
-    r"trade (above|below))\b", re.IGNORECASE)
+    rf"(up or down|all[\s-]time high|\bath\b|hit\s*\(?(high|low)\)?|"
+    rf"(reach(es)?|dip to|trade|close|price of)\s+(above|below|{_DOLLAR})|"
+    rf"(above|below)\s*{_DOLLAR}|{_DOLLAR})", re.IGNORECASE)
 
 
 def is_price_market(question: str) -> bool:

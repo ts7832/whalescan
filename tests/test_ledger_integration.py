@@ -197,6 +197,39 @@ async def test_a_confirmed_wallets_new_bet_produces_a_badged_alert_and_a_confirm
     signals = json.loads((tmp_path / "snap" / "signals.json").read_text())
     confirmed_alerts = [s for s in signals if s["kind"] == "CONFIRMED"]
     assert len(confirmed_alerts) == 1 and confirmed_alerts[0]["wallet"] == "0xproven"
+    # the alert must be honest, not a repurposed "failed sniper" JSON, and never collide with another card's id
+    assert confirmed_alerts[0]["status"] != "REJECTED"
+    assert all(c["passed"] for c in confirmed_alerts[0]["checks"])
+    assert confirmed_alerts[0]["id"] != confirmed_alerts[0]["asset"]  # sanity: id is not blank/degenerate
+    assert confirmed_alerts[0]["id"].endswith(":CONFIRMED")
 
     calls = Ledger(ledger_dir).calls()
     assert any(c["kind"] == "CONFIRMED" and c["wallet"] == "0xproven" for c in calls)
+
+
+async def test_a_confirmed_wallets_bet_outside_the_price_band_is_not_alerted(tmp_path):
+    cfg = config(tmp_path)
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir(parents=True)
+    led = Ledger(ledger_dir)
+    led.append_call({"id": "old:INSIDER", "kind": "INSIDER", "wallet": "0xproven", "outcome_index": 0,
+                     "call_ts": NOW - 20 * DAY, "condition_id": "0xold", "asset": "old-y", "question": "old?",
+                     "category": "POLITICS", "tier": "B", "entry_cost": 0.4, "missed_rule": None})
+    led.append_mark({"call_id": "old:INSIDER", "type": "SETTLEMENT", "at": NOW - 10 * DAY, "return_pct": 0.5,
+                     "irregular": False})
+    # a bet priced at 0.98 — outside [insider].price_min..price_max — must not alert even from a proven wallet
+    bet = [Trade("0x1", NOW - 600, "0xproven", "yes", "0xc", "BUY", 0.98, 30_000.0 / 0.98, "x-happen", "q", "Yes",
+                 0, None)]
+
+    class OldGamma(FakeGamma):
+        async def created_ts(self, wallet):
+            return NOW - 900 * DAY
+
+    class OldData(FakeData):
+        async def markets_traded(self, wallet):
+            return 500
+
+    apis = Apis(OldData(bet), OldGamma(), FakeClob())
+    await run_sweep(cfg, apis=apis, now=NOW)
+    signals = json.loads((tmp_path / "snap" / "signals.json").read_text())
+    assert not [s for s in signals if s["kind"] == "CONFIRMED"]

@@ -102,7 +102,7 @@ export interface Snapshot { meta: Meta; signals: Signal[]; contacts: Signal[]; w
 
 // --- Track Record ledger (data.ts loadLedgerSummary; the `ledger` branch's summary.json) ---
 
-export type LedgerKind = 'INSIDER' | 'SNIPER' | 'NEAR_MISS';
+export type LedgerKind = 'INSIDER' | 'SNIPER' | 'NEAR_MISS' | 'CONFIRMED';
 
 export interface LedgerKindStats {
   calls: number;

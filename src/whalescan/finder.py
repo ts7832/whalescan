@@ -15,9 +15,11 @@ import pandas as pd
 from whalescan.classify import Blocklist, category_for_tags
 from whalescan.config import Config
 from whalescan.finder_math import is_covered, known_at, move_hit
+from whalescan.gate import Evaluation
 from whalescan.history import signal_ts, study_events
 from whalescan.history_store import HistoryStore
 from whalescan.ledger import Ledger
+from whalescan.models import Market
 from whalescan.study import _payout, _week
 from whalescan.study_math import copy_entry, copy_return
 
@@ -39,11 +41,12 @@ def bucket_of(p0: float) -> str | float:
 
 
 class _MovePrices:
-    """All recorded minute prices, per asset, sorted — one bulk read, then a range query per bet (mirrors
-    study.py's _Prices, but returns every point in a window rather than the single price known "as of" a time)."""
+    """All recorded Finder price points, per asset, sorted — one bulk read, then a range query per bet. Reads
+    ONLY h_finder_prices (never the evidence study's h_prices): a slot window that was never fetched must read
+    as truly empty here, not silently filled in by the study's own, differently-scoped price data."""
 
     def __init__(self, store: HistoryStore) -> None:
-        df = store.con.execute("SELECT asset, ts, price FROM h_prices ORDER BY asset, ts").df()
+        df = store.con.execute("SELECT asset, ts, price FROM h_finder_prices ORDER BY asset, ts").df()
         self._by_asset: dict[str, tuple[list[int], list[float]]] = {
             a: (g["ts"].astype(int).tolist(), g["price"].astype(float).tolist()) for a, g in df.groupby("asset")}
 
@@ -53,13 +56,12 @@ class _MovePrices:
         j = bisect.bisect_right(ts, until_inclusive)
         return list(zip(ts[i:j], ps[i:j]))
 
-    def at_or_before(self, asset: str, t: int) -> float | None:
-        """Latest recorded price at or before `t` — used for copy-trade entry pricing, same rule as study.py's
-        _Prices.at (a late print up to a short grace period after `t` also counts there; moves_frame reuses the
-        stricter "no look-ahead beyond the exact time" rule since it is only ever called at t <= known_ts)."""
+    def at_or_before(self, asset: str, t: int, since: int) -> float | None:
+        """Latest recorded price in [since, t] — never a print from before `since` (the signal): a gap right
+        after the signal must give no entry at all, not a stale pre-signal price that understates the cost."""
         ts, ps = self._by_asset.get(asset, ([], []))
         i = bisect.bisect_right(ts, t) - 1
-        return ps[i] if i >= 0 else None
+        return ps[i] if i >= 0 and ts[i] >= since else None
 
 
 def moves_frame(store: HistoryStore, cfg: Config) -> pd.DataFrame:
@@ -100,7 +102,7 @@ def moves_frame(store: HistoryStore, cfg: Config) -> pd.DataFrame:
         for d in delays:
             when = t + d * 60
             already_resolved = m.closed and resolved is not None and when >= resolved
-            entry = None if already_resolved else copy_entry(prices.at_or_before(e.asset, when), e.price, m, ic, sc)
+            entry = None if already_resolved else copy_entry(prices.at_or_before(e.asset, when, t), e.price, m, ic, sc)
             row[f"entry_{d}"] = math.nan if entry is None else entry.cost
             scored = entry is not None and payout is not None
             row[f"ret_{d}"] = copy_return(payout, entry) if scored else math.nan
@@ -191,3 +193,15 @@ def confirmed_wallets(ledger: Ledger, now: int, cfg: Config) -> set[str]:
         if len(later) >= fc.demote_after and sum(later) / len(later) < 0:
             demoted.add(wallet)
     return confirmed - demoted
+
+
+def is_confirmed_alert(e: Evaluation, market: Market | None, confirmed: set[str], cfg: Config,
+                       blocklist: Blocklist) -> bool:
+    """Is this evaluation a live confirmed-insider alert: a big BUY in the tradeable price band, in a covered
+    market that hasn't expired or closed, by a wallet on the watchlist? Shared by sweep.py's live alert
+    injection and ledger_runner.py's call logging, so both apply exactly the same eligibility."""
+    ic, fc = cfg.insider, cfg.finder
+    ev = e.event
+    return (ev.wallet in confirmed and ev.side == "BUY" and e.status != "EXPIRED"
+            and ev.usdc >= fc.min_usdc and ic.price_min <= ev.price <= ic.price_max
+            and market is not None and is_covered(market, cfg, blocklist))

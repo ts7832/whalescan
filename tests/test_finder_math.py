@@ -28,6 +28,18 @@ def mk(question, *, tags=("Politics",), volume=1e6, closed=False, end_ts=NOW + 3
     ("Will MicroStrategy announce a Bitcoin purchase August 25-31?", False),
     ("Will Roberto Sánchez Palomino win the 2026 Peruvian presidential election?", False),
     ("Clarity Act (H.R.3633) signed into law in 2026?", False),
+    # found by the final review: the original regex's bare "hit"/"reach"/"above"/"below" wrongly excluded
+    # core insider-category (geopolitics/politics/economy) questions that merely contain those words
+    ("Will Israel hit Iran nuclear facilities before 2027?", False),
+    ("Will a hurricane hit Florida this season?", False),
+    ("Will Russia and Ukraine reach a ceasefire by 2027?", False),
+    ("Will the US and China reach a trade deal in 2026?", False),
+    ("Will Trump's approval rating be above 45% in October?", False),
+    ("Will the Fed cut rates below 4% by December?", False),
+    # these must still be recognised as price-threshold markets
+    ("Bitcoin all time high by March 2027?", True),
+    ("Will gold be $3,000 by December?", True),
+    ("Will ETH trade above $3,000 by Friday?", True),
 ])
 def test_price_threshold_questions_are_recognised(question, expected):
     assert is_price_market(question) is expected
