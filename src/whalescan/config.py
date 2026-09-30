@@ -153,6 +153,7 @@ class StudyCfg:
     max_event_fraction: float
     max_exposure_fraction: float
     max_whale_share: float
+    baseline_sample: int
 
 
 @dataclass(frozen=True)

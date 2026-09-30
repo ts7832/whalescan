@@ -263,3 +263,45 @@ async def test_gamma_block_propagates_as_itself_through_concurrent_chunks():
 
     with pytest.raises(BlockedError):
         await GammaApi(http(handler)).markets([f"0x{i}" for i in range(1000)])
+
+
+async def test_trades_can_be_read_per_market_with_the_cash_filter():
+    seen = []
+
+    def handler(request):
+        q = request.url.params
+        seen.append((q.get("market"), q.get("filterAmount"), q.get("user")))
+        off = int(q["offset"])
+        return httpx.Response(200, json=[trade(off + k, 1000 - off - k) for k in range(500 if off == 0 else 3)])
+
+    page = await DataApi(http(handler)).trades(market="0xc", min_usdc=1000)
+    assert page.complete and len(page.trades) == 503
+    assert seen[0] == ("0xc", "1000", None)
+
+
+async def test_gamma_lists_markets_by_end_date_window_across_pages():
+    seen = []
+
+    def handler(request):
+        q = request.url.params
+        seen.append((q["closed"], q["end_date_min"], q["end_date_max"], q["volume_num_min"], int(q["offset"])))
+        off = int(q["offset"])
+        n = 100 if off < 200 else 17
+        return httpx.Response(200, json=[{"conditionId": f"0x{off + k}", "closed": True, "outcomePrices": "[\"1\",\"0\"]",
+                                          "tags": [{"label": "Politics"}]} for k in range(n)])
+
+    ms = await GammaApi(http(handler)).listed_markets(closed=True, end_min_ts=1_780_000_000, end_max_ts=1_790_000_000,
+                                                      min_volume=10_000)
+    assert len(ms) == 217 and ms[0].tags == ("Politics",)
+    assert [s[4] for s in seen] == [0, 100, 200]
+    assert seen[0][:4] == ("true", "2026-05-28T20:26:40Z", "2026-09-21T14:13:20Z", "10000")
+
+
+async def test_clob_price_window_asks_for_minute_prices_between_two_times():
+    def handler(request):
+        q = request.url.params
+        assert (q["market"], q["startTs"], q["endTs"], q["fidelity"]) == ("tok", "100", "4000", "1")
+        return httpx.Response(200, json={"history": [{"t": 160, "p": 0.41}, {"t": 220, "p": 0.43}]})
+
+    pts = await ClobApi(http(handler)).price_window("tok", 100, 4000)
+    assert [(p.ts, p.price) for p in pts] == [(160, 0.41), (220, 0.43)]

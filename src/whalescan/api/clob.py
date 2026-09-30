@@ -17,6 +17,12 @@ class ClobApi:
     async def book(self, token_id: str) -> BookSnapshot:
         return parse_book(await self._http.get_json(f"{CLOB_API}/book", [("token_id", token_id)]))
 
+    async def price_window(self, token_id: str, start_ts: int, end_ts: int, *, fidelity: int = 1) -> list[PricePoint]:
+        """Prices between two times at `fidelity`-minute resolution (works for resolved markets too)."""
+        data = await self._http.get_json(f"{CLOB_API}/prices-history", [
+            ("market", token_id), ("startTs", start_ts), ("endTs", end_ts), ("fidelity", fidelity)])
+        return parse_price_history(data)
+
     async def price_history(self, token_id: str, *, interval: str = "1w", fidelity: int = 60) -> list[PricePoint]:
         data = await self._http.get_json(
             f"{CLOB_API}/prices-history", [("market", token_id), ("interval", interval), ("fidelity", fidelity)])

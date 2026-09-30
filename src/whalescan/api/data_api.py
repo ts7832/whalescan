@@ -109,12 +109,15 @@ class DataApi:
             offset += OPEN_PAGE
         return PositionHistory(out, False)
 
-    async def trades(self, *, user: str | None = None, min_usdc: float | None = None,
+    async def trades(self, *, user: str | None = None, market: str | None = None, min_usdc: float | None = None,
                      since_ts: int | None = None) -> TradePage:
-        """Trades newest first (maker and taker sides), stopping at `since_ts`."""
+        """Trades newest first (maker and taker sides), optionally for one wallet or one market, stopping at
+        `since_ts`. `complete` is False when the API's offset cap cut the history short."""
         base: list[tuple[str, str | int | float]] = [("limit", TRADES_PAGE), ("takerOnly", "false")]
         if user:
             base.append(("user", user))
+        if market:
+            base.append(("market", market))
         if min_usdc is not None:
             base += [("filterType", "CASH"), ("filterAmount", int(min_usdc))]
         out: list[Trade] = []

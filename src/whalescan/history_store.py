@@ -45,6 +45,10 @@ class HistoryStore(Store):
                ORDER BY condition_id""", [now - OPEN_REFRESH_S]).fetchall()
         return [r[0] for r in rows]
 
+    def study_market_ids(self, *, closed_only: bool = False) -> set[str]:
+        sql = "SELECT condition_id FROM h_market_state" + (" WHERE NOT is_open" if closed_only else "")
+        return {r[0] for r in self.con.execute(sql).fetchall()}
+
     def mark_fills(self, condition_id: str, now: int, *, complete: bool) -> None:
         self.con.execute("UPDATE h_market_state SET fills_fetched_at = ?, fills_complete = ? WHERE condition_id = ?",
                          [now, complete, condition_id])

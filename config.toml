@@ -138,6 +138,7 @@ max_bet_fraction = 0.05
 max_event_fraction = 0.10
 max_exposure_fraction = 0.60
 max_whale_share = 0.20         # never more than this share of the whale's own position (liquidity)
+baseline_sample = 3000         # price windows for this many non-fresh big bets (the BASELINE rule)
 
 [blocklist]
 slug_patterns = ["updown", "up-or-down", "-(5|15)m-"]

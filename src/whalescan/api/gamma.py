@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 from collections.abc import Iterable
 
 from whalescan.api.http import ApiError, BlockedError, HttpClient
@@ -70,6 +71,31 @@ class GammaApi:
                 raise eg.exceptions[0] from None
             remaining = [c for c in remaining if c not in out]
         return out
+
+    async def listed_markets(self, *, closed: bool, end_min_ts: int, end_max_ts: int,
+                             min_volume: float) -> list[Market]:
+        """Every market whose scheduled end falls in [end_min_ts, end_max_ts], closed or open, with at least
+        `min_volume` traded, across all pages (100 per page)."""
+        def iso(ts: int) -> str:
+            return datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        out: list[Market] = []
+        offset = 0
+        while True:
+            rows = await self._http.get_json(f"{GAMMA_API}/markets", [
+                ("closed", "true" if closed else "false"), ("include_tag", "true"), ("limit", CHUNK),
+                ("offset", offset), ("end_date_min", iso(end_min_ts)), ("end_date_max", iso(end_max_ts)),
+                ("volume_num_min", int(min_volume))])
+            if not isinstance(rows, list):
+                log.warning("gamma returned %s instead of a list", type(rows).__name__)
+                self.skipped += 1
+                return out
+            markets, skipped = parse_many(rows, parse_market)
+            self.skipped += skipped
+            out.extend(markets)
+            if len(rows) < CHUNK:
+                return out
+            offset += CHUNK
 
     async def _chunk(self, chunk: list[str], closed: str) -> list | None:
         try:
