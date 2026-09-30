@@ -1,5 +1,6 @@
 import math
 
+import pandas as pd
 import pytest
 
 from whalescan.config import load_config
@@ -110,3 +111,69 @@ def test_the_bucket_matches_the_preregistered_edges(store, p0, expected):
     store.upsert_trades([fill("a", T, "0xw", "0xc", 30_000, price=p0)])
     r = row(moves_frame(store, CFG), "0xw")
     assert r["bucket"] == expected
+
+
+# --- base_rates / qualify ---------------------------------------------------
+
+from whalescan.finder import base_rates, qualify  # noqa: E402
+
+
+def frame(rows):
+    return pd.DataFrame(rows)
+
+
+def move(idx_wallet, signal_ts, known_ts, bucket, hit):
+    return {"wallet": idx_wallet, "signal_ts": signal_ts, "known_ts": known_ts, "bucket": bucket, "move_hit": hit}
+
+
+def test_base_rates_are_learned_only_from_bets_with_a_known_outcome():
+    train = frame([move("w", 0, 100, "0.40-0.60", 1.0), move("w", 1, 101, "0.40-0.60", 0.0),
+                  move("w", 2, 102, "0.40-0.60", float("nan"))])  # unknown: must not count
+    rates = base_rates(train)
+    assert rates["0.40-0.60"] == pytest.approx(0.5)
+
+
+def test_qualify_never_uses_a_bets_own_move_to_qualify_itself():
+    # a wallet's ONLY bet, a hit in a bucket whose base rate is low: it must never look "informed" from its
+    # own outcome — a real wallet with zero prior track record has nothing to be judged on yet.
+    moves = frame([move("w", 1000, 1100, "0.02-0.20", 1.0)])
+    rates = {"0.02-0.20": 0.1}
+    assert not qualify(moves, rates, min_bets=1, min_z=0.0).iloc[0]
+
+
+def test_a_move_known_after_the_signal_time_does_not_count_yet():
+    moves = frame([move("w", 1000, 1100, "0.40-0.60", 1.0),  # earlier bet, known at 1100
+                  move("w", 1099, 5000, "0.40-0.60", 1.0)])   # this bet fires at 1099 — before the first is known
+    rates = {"0.40-0.60": 0.1}
+    result = qualify(moves, rates, min_bets=1, min_z=0.0)
+    assert not result.iloc[1]  # at signal_ts=1099, the first bet's known_ts=1100 hasn't arrived (1100 > 1099)
+
+
+def test_a_move_known_exactly_at_the_signal_time_does_count():
+    moves = frame([move("w", 1000, 1100, "0.40-0.60", 1.0), move("w", 1100, 5000, "0.40-0.60", 1.0)])
+    rates = {"0.40-0.60": 0.1}
+    result = qualify(moves, rates, min_bets=1, min_z=0.0)
+    assert result.iloc[1]
+
+
+def test_qualification_needs_at_least_min_bets_known_moves():
+    early = [move("w", i, i + 1, "0.40-0.60", 1.0) for i in range(4)]  # 4 hits, would easily clear min_z
+    moves = frame(early + [move("w", 1000, 2000, "0.40-0.60", 1.0)])
+    rates = {"0.40-0.60": 0.5}
+    assert not qualify(moves, rates, min_bets=5, min_z=0.0).iloc[-1]  # only 4 prior known moves: not enough
+
+
+def test_qualification_z_score_matches_the_hand_computed_value():
+    # 10 prior known bets, base rate 0.5, 9 hits: E=5, V=2.5, z=(9-5)/sqrt(2.5) ~= 2.530
+    early = [move("w", i, i + 1, "0.40-0.60", 1.0 if i < 9 else 0.0) for i in range(10)]
+    moves = frame(early + [move("w", 1000, 2000, "0.40-0.60", 1.0)])
+    rates = {"0.40-0.60": 0.5}
+    assert qualify(moves, rates, min_bets=5, min_z=2.33).iloc[-1]  # z ~= 2.530 >= 2.33
+    assert not qualify(moves, rates, min_bets=5, min_z=2.6).iloc[-1]  # z ~= 2.530 < 2.6
+
+
+def test_a_wallet_exactly_matching_the_base_rate_does_not_qualify():
+    early = [move("w", i, i + 1, "0.40-0.60", 1.0 if i < 5 else 0.0) for i in range(10)]  # 5/10, matches base rate
+    moves = frame(early + [move("w", 1000, 2000, "0.40-0.60", 1.0)])
+    rates = {"0.40-0.60": 0.5}
+    assert not qualify(moves, rates, min_bets=5, min_z=0.5).iloc[-1]

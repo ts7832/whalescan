@@ -9,6 +9,7 @@ import logging
 import math
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from whalescan.classify import Blocklist, category_for_tags
@@ -107,3 +108,53 @@ def moves_frame(store: HistoryStore, cfg: Config) -> pd.DataFrame:
     log.info("finder: %d covered big bets (%d with a known move outcome)", len(rows),
              sum(1 for r in rows if not (isinstance(r["move_hit"], float) and math.isnan(r["move_hit"]))))
     return pd.DataFrame(rows)
+
+
+def base_rates(train: pd.DataFrame) -> dict[str, float]:
+    """Per-bucket probability a covered big bet's price moves the wallet's way within 24h — learned only from
+    bets with a KNOWN outcome, on the training period (spec §1: never the test period)."""
+    known = train[train["move_hit"].notna()]
+    if known.empty:
+        return {}
+    return known.groupby("bucket")["move_hit"].mean().to_dict()
+
+
+def qualify(moves: pd.DataFrame, rates: dict[str, float], min_bets: int, min_z: float) -> pd.Series:
+    """Boolean per row of `moves`: is the wallet INFORMED at THIS bet's signal_ts? Walk-forward — for each bet,
+    only the SAME wallet's other bets whose move outcome was already known_at-or-before this bet's signal_ts
+    contribute (never this bet's own move: known_ts is always strictly after its own signal_ts, so it can never
+    appear among its own "already known" evidence; a defensive check below removes it if it somehow did)."""
+    result = pd.Series(False, index=moves.index)
+    if moves.empty:
+        return result
+    scored = moves[moves["move_hit"].notna()].copy()
+    scored["b"] = scored["bucket"].map(rates)
+    scored = scored[scored["b"].notna()]
+
+    for wallet, g in moves.groupby("wallet", sort=False):
+        wk = scored[scored["wallet"] == wallet].sort_values("known_ts", kind="stable")
+        if wk.empty:
+            continue
+        known_ts_list = wk["known_ts"].tolist()
+        h_arr = wk["move_hit"].to_numpy(dtype=float)
+        b_arr = wk["b"].to_numpy(dtype=float)
+        v_arr = b_arr * (1.0 - b_arr)
+        cum_h = np.concatenate([[0.0], np.cumsum(h_arr)])
+        cum_e = np.concatenate([[0.0], np.cumsum(b_arr)])
+        cum_v = np.concatenate([[0.0], np.cumsum(v_arr)])
+        pos_of_idx = {idx: i for i, idx in enumerate(wk.index)}
+
+        for idx, row in g.iterrows():
+            pos = bisect.bisect_right(known_ts_list, row["signal_ts"])
+            n, h_sum, e_sum, v_sum = pos, cum_h[pos], cum_e[pos], cum_v[pos]
+            self_pos = pos_of_idx.get(idx)
+            if self_pos is not None and self_pos < pos:  # defensive; should not occur (known_ts > signal_ts)
+                n -= 1
+                h_sum -= h_arr[self_pos]
+                e_sum -= b_arr[self_pos]
+                v_sum -= v_arr[self_pos]
+            if n < min_bets or v_sum <= 0:
+                continue
+            z = (h_sum - e_sum) / math.sqrt(v_sum)
+            result.loc[idx] = bool(z >= min_z)
+    return result
