@@ -154,3 +154,52 @@ async def test_long_phases_log_their_progress(caplog):
     await _bounded(range(250), work, 8, label="fills")
     assert len(done) == 250
     assert "history: fills 250/250" in caplog.text and "history: fills 25/250" in caplog.text
+
+
+async def test_a_truncated_wallet_history_is_never_used_to_count_markets_and_not_refetched(tmp_path):
+    from whalescan.api.data_api import TradePage as TP
+
+    apis = world()
+    orig = apis.data.trades
+
+    async def truncated(*, user=None, market=None, min_usdc=None, since_ts=None):
+        page = await orig(user=user, market=market, min_usdc=min_usdc, since_ts=since_ts)
+        if user is not None:
+            return TP(page.trades * 1, False)  # the API's depth cap cut the history short
+        return page
+
+    apis.data.trades = truncated
+    import whalescan.history as hist
+    old_cap = hist.MAX_OFFSET
+    hist.MAX_OFFSET = 1  # treat any partial history as truncated at the cap
+    try:
+        with HistoryStore(tmp_path / "h.duckdb") as h:
+            await build_history(apis, h, CFG, NOW)
+            assert h.markets_traded_before("0xfresh", NOW - 20 * DAY) is None
+            calls = len(apis.data.wallet_calls)
+            await build_history(apis, h, CFG, NOW + 60)
+            assert len(apis.data.wallet_calls) == calls  # a truncated history can't improve: don't refetch it
+    finally:
+        hist.MAX_OFFSET = old_cap
+
+
+async def test_a_history_that_failed_midway_is_retried_next_run(tmp_path):
+    from whalescan.api.data_api import TradePage as TP
+
+    apis = world()
+    orig = apis.data.trades
+    fail = {"on": True}
+
+    async def flaky(*, user=None, market=None, min_usdc=None, since_ts=None):
+        page = await orig(user=user, market=market, min_usdc=min_usdc, since_ts=since_ts)
+        if user is not None and fail["on"]:
+            return TP(page.trades[:0], False)  # an error page mid-stream: nothing trustworthy
+        return page
+
+    apis.data.trades = flaky
+    with HistoryStore(tmp_path / "h.duckdb") as h:
+        await build_history(apis, h, CFG, NOW)
+        assert h.markets_traded_before("0xfresh", NOW - 20 * DAY) is None
+        fail["on"] = False
+        await build_history(apis, h, CFG, NOW + 60)
+        assert h.markets_traded_before("0xfresh", NOW - 20 * DAY) == 1

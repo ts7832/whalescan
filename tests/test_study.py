@@ -147,3 +147,16 @@ def test_small_buys_are_not_bets(store):
     store.upsert_trades([fill("a", T, "0xsmall", "0xpol", 2_000)])
     df = bets_frame(store, CFG)
     assert df.empty or "0xsmall" not in set(df["wallet"])
+
+
+def test_no_entry_after_the_market_has_already_resolved(store):
+    from dataclasses import replace as _replace
+    fast = _replace(mk("0xfast"), end_ts=T + 3 * DAY, closed_ts=T + 10 * MIN)  # resolved 10 min after the signal
+    store.upsert_markets([fast], NOW)
+    store.register_markets(["0xfast"], is_open=False)
+    store.upsert_trades([fill("a", T, "0xw", "0xfast", 30_000)])
+    store.upsert_profiles([WalletProfile("0xw", T - 900 * DAY, None, NOW)])
+    store.upsert_prices("0xfast-y", [(T + 30, 0.40), (T + 20 * MIN, 0.99)])
+    r = row(bets_frame(store, CFG), "0xw", "0xfast")
+    assert r["entry_5"] == r["entry_5"]  # 5 min: still open, a real entry
+    assert math.isnan(r["entry_15"]) and math.isnan(r["ret_15"])  # 15 min: the outcome was already known

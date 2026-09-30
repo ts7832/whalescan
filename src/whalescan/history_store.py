@@ -14,6 +14,8 @@ HISTORY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS h_market_state (
   condition_id VARCHAR PRIMARY KEY, is_open BOOLEAN, fills_fetched_at BIGINT, fills_complete BOOLEAN);
 CREATE TABLE IF NOT EXISTS h_wallet_history (wallet VARCHAR PRIMARY KEY, fetched_at BIGINT);
+ALTER TABLE h_wallet_history ADD COLUMN IF NOT EXISTS complete BOOLEAN;
+ALTER TABLE h_wallet_history ADD COLUMN IF NOT EXISTS truncated BOOLEAN;
 CREATE TABLE IF NOT EXISTS h_prices (asset VARCHAR, ts BIGINT, price DOUBLE, PRIMARY KEY (asset, ts));
 CREATE TABLE IF NOT EXISTS h_price_windows (asset VARCHAR, t0 BIGINT, PRIMARY KEY (asset, t0));
 """
@@ -53,11 +55,20 @@ class HistoryStore(Store):
         self.con.execute("UPDATE h_market_state SET fills_fetched_at = ?, fills_complete = ? WHERE condition_id = ?",
                          [now, complete, condition_id])
 
-    def mark_wallet_history(self, wallet: str, now: int) -> None:
-        self.con.execute("INSERT OR REPLACE INTO h_wallet_history VALUES (?, ?)", [wallet, now])
+    def mark_wallet_history(self, wallet: str, now: int, *, complete: bool = True, truncated: bool = False) -> None:
+        """Record a wallet's history fetch. Only a COMPLETE history can count markets traded; one cut short by the
+        API's depth cap is recorded as truncated (it will never improve, so it is not refetched)."""
+        self.con.execute("""INSERT OR REPLACE INTO h_wallet_history (wallet, fetched_at, complete, truncated)
+                            VALUES (?, ?, ?, ?)""", [wallet, now, complete, truncated])
 
     def wallets_with_history(self) -> set[str]:
-        return {r[0] for r in self.con.execute("SELECT wallet FROM h_wallet_history").fetchall()}
+        """Wallets whose full trade history is stored (rows from before completeness was tracked do not count)."""
+        return {r[0] for r in self.con.execute("SELECT wallet FROM h_wallet_history WHERE complete").fetchall()}
+
+    def wallets_history_done(self) -> set[str]:
+        """Wallets not worth fetching again: complete, or truncated at the API's depth cap."""
+        return {r[0] for r in self.con.execute(
+            "SELECT wallet FROM h_wallet_history WHERE complete OR truncated").fetchall()}
 
     def markets_traded_before(self, wallet: str, ts: int) -> int | None:
         """Distinct markets the wallet traded strictly before `ts` — None unless its full history was fetched

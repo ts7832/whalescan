@@ -136,15 +136,17 @@ async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) 
     profiles = store.profiles(wallets)
     ages = {e.id: account_age_days(e, profiles.get(e.wallet)) for e in big}
     young = {e.wallet for e in big if ages[e.id] is not None and ages[e.id] <= sc.history_max_age_days}
-    todo_wallets = sorted(young - store.wallets_with_history())
+    todo_wallets = sorted(young - store.wallets_history_done())
 
     async def history(wallet: str) -> None:
         page = await _guarded(apis.data.trades(user=wallet), f"history {wallet}")
         if page is None:
             return
         store.upsert_trades(page.trades)
-        store.mark_wallet_history(wallet, now)
-        rep.wallet_histories += 1
+        truncated = not page.complete and len(page.trades) >= MAX_OFFSET  # the depth cap: will never be complete
+        if page.complete or truncated:  # a history that failed midway is simply retried next run
+            store.mark_wallet_history(wallet, now, complete=page.complete, truncated=truncated)
+            rep.wallet_histories += 1
 
     await _bounded(todo_wallets, history, cfg.http.concurrency, label="wallet histories")
 

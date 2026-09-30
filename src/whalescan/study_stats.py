@@ -75,10 +75,11 @@ def rule_summary(df: pd.DataFrame, rule_col: str, *, delay: int, n_boot: int, se
     }
 
 
-def bets_per_week(df: pd.DataFrame, rule_col: str) -> dict[str, Any]:
-    """Qualifying bets per calendar week (by bet time, resolved or not). The first and last weeks of the data are
-    partial and dropped; weeks with no qualifying bet count as zero."""
-    weeks = sorted(df["week"].unique())[1:-1]
+def bets_per_week(df: pd.DataFrame, rule_col: str, *, since_week: str | None = None) -> dict[str, Any]:
+    """Qualifying bets per calendar week (by bet time, resolved or not). Only weeks from `since_week` count — the
+    study loads markets that ENDED in its lookback, so earlier weeks see only long-lived markets and would drag
+    the rate down. The first and last covered weeks are partial and dropped; weeks with no bet count as zero."""
+    weeks = sorted(w for w in df["week"].unique() if since_week is None or w >= since_week)[1:-1]
     counts = df[df[rule_col].astype(bool)].groupby("week").size()
     per = [int(counts.get(w, 0)) for w in weeks]
     if not per:

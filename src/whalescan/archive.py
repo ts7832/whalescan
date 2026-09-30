@@ -35,9 +35,17 @@ def archive_round(root: Path, trades: list[Trade], now: int) -> Path | None:
 
 
 def read_archive(root: Path) -> list[Trade]:
+    """Every archived fill once, oldest round first. A lost sweep cache makes the next round re-archive its 24 h
+    window, so fills are de-duplicated by their full key here — readers must never double-count."""
     fields = set(Trade.__dataclass_fields__)
     out: list[Trade] = []
+    seen: set[tuple] = set()
     for path in sorted((root / "fills").glob("*/*.jsonl.gz")):
         with gzip.open(path, "rt") as f:
-            out.extend(Trade(**{k: v for k, v in json.loads(line).items() if k in fields}) for line in f)
+            for line in f:
+                t = Trade(**{k: v for k, v in json.loads(line).items() if k in fields})
+                key = (t.tx_hash, t.wallet, t.asset, t.side, t.price, t.size)
+                if key not in seen:
+                    seen.add(key)
+                    out.append(t)
     return out

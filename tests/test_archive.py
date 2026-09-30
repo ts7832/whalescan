@@ -35,3 +35,10 @@ def test_store_reports_only_fills_it_has_not_seen(tmp_path):
         s.upsert_trades([fill("a", NOW)])
         new = s.new_trades([fill("a", NOW), fill("b", NOW), fill("a", NOW, usdc=3000.0)])  # same tx, other fill
         assert [(t.tx_hash, t.usdc) for t in new] == [("b", 2000.0), ("a", 3000.0)]
+
+
+def test_reading_the_archive_drops_fills_archived_twice(tmp_path):
+    # after a lost sweep cache the first round re-archives the last 24 h: readers must never double-count
+    archive_round(tmp_path, [fill("a", NOW - 60), fill("b", NOW - 30)], NOW)
+    archive_round(tmp_path, [fill("a", NOW - 60), fill("c", NOW + 10)], NOW + 900)
+    assert [t.tx_hash for t in read_archive(tmp_path)] == ["a", "b", "c"]

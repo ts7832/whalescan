@@ -159,7 +159,8 @@ def bets_frame(store: HistoryStore, cfg: Config) -> pd.DataFrame:
         row["r_near_miss"] = row["missed_rule"] is not None
         for d in delays:
             when = t + d * 60
-            entry = copy_entry(prices.at(e.asset, when, t), e.price, m, ic, sc)
+            already_resolved = m.closed and resolved is not None and when >= resolved  # outcome known: no entry
+            entry = None if already_resolved else copy_entry(prices.at(e.asset, when, t), e.price, m, ic, sc)
             row[f"entry_{d}"] = math.nan if entry is None else entry.cost
             scored = entry is not None and payout is not None
             row[f"ret_{d}"] = copy_return(payout, entry) if scored else math.nan

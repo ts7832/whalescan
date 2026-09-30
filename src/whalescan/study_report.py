@@ -8,7 +8,7 @@ test period only, with win probabilities learned from the training period.
 from __future__ import annotations
 
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +36,8 @@ def _candidates(df: pd.DataFrame, d: int) -> dict[str, pd.Series]:
                 if hmax is not None:
                     mask = mask & (df["days_to_end"] <= hmax)
                 if pmax is not None:
-                    mask = mask & (df[f"entry_{d}"] <= pmax)
+                    entry = df[f"entry_{d}"]
+                    mask = mask & (entry.isna() | (entry <= pmax))  # keep no-entry bets: counted as skipped
                 name = rule if hmax is None and pmax is None else f"{rule} | {hname} | {pname}"
                 out[name] = mask
     return out
@@ -73,6 +74,8 @@ def study_results(df: pd.DataFrame, cfg: Config) -> dict[str, Any]:
     d = sc.headline_delay_min
     kw = dict(n_boot=sc.bootstrap, seed=sc.seed, min_wallets=sc.min_wallets)
     resolved = df[df["payout"].notna()]
+    covered_from = datetime.fromtimestamp(int(df["signal_ts"].max()) - sc.lookback_days * 86400, UTC).date()
+    since_week = (covered_from - timedelta(days=covered_from.weekday())).isoformat()
     train, test = time_split(resolved, sc.train_fraction)
     cut = int(test["signal_ts"].min()) if not test.empty else None
 
@@ -125,7 +128,7 @@ def study_results(df: pd.DataFrame, cfg: Config) -> dict[str, Any]:
                      "train_bets": int(len(train)), "test_bets": int(len(test))},
         "headline": headline,
         "verdict": {"go": all(c["passed"] for c in checks), "checks": checks},
-        "bets_per_week": {name: bets_per_week(df, col) for name, col in RULES.items()},
+        "bets_per_week": {name: bets_per_week(df, col, since_week=since_week) for name, col in RULES.items()},
         "candidates": candidates,
         "delay_curve": delay_curve,
         "factors": factors,
@@ -174,7 +177,8 @@ def render_markdown(res: dict[str, Any]) -> str:
         f"- return **per dollar** after fees and spread: **{_pct(h.get('mean_return'))}** "
         f"(90% CI {_pct(h.get('ci_lo'))} to {_pct(h.get('ci_hi'))}, wallets resampled)",
         f"- {h.get('n_bets', 0)} bets from {h.get('n_wallets', 0)} wallets · hit rate {_pct(h.get('hit_rate'))} · "
-        f"{h.get('n_skipped', 0)} skipped because the price ran away · per-wallet t = "
+        f"{h.get('n_skipped', 0)} skipped with no executable entry (price ran past the chase limit, left the band, "
+        f"or had no print) · per-wallet t = "
         f"{'—' if h.get('wallet_t') is None else round(h['wallet_t'], 2)}",
         f"- median days held {h.get('median_days_held') or '—'} · return per dollar per day "
         f"{_pct(h.get('return_per_day'))} · status {h.get('status')}", "",

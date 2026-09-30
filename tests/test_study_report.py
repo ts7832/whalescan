@@ -128,3 +128,13 @@ def test_cli_study_prints_the_headline_and_where_the_report_is(monkeypatch, caps
     assert cli.main(["study"]) == 0
     out = capsys.readouterr().out
     assert "INSIDER" in out and "+8.0%" in out and "NO-GO" in out and "r.md" in out
+
+
+def test_price_capped_rules_still_count_bets_skipped_for_lack_of_an_entry():
+    df = bets()
+    test_rows = df.index[df["signal_ts"] >= df["signal_ts"].quantile(SC.train_fraction)]
+    df.loc[test_rows[:5], f"entry_{D}"] = math.nan  # no executable entry for five test bets
+    df.loc[test_rows[:5], f"ret_{D}"] = math.nan
+    res = study_results(df, CFG_FAST)
+    capped = [c for n, c in res["candidates"].items() if n.startswith("INSIDER | any horizon | entry <= 0.85")][0]
+    assert capped["test"]["n_skipped"] == 5

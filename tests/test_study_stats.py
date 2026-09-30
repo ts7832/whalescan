@@ -103,3 +103,13 @@ def test_horizon_table_groups_by_days_held():
     assert rows["30-90d"]["n"] == 1 and rows[">90d"]["n"] == 1
     assert rows["1-7d"]["mean_return"] == pytest.approx(0.1)
     assert rows["1-7d"]["return_per_day"] == pytest.approx(0.1 / 3)
+
+
+def test_bets_per_week_can_be_limited_to_the_weeks_the_study_actually_covers():
+    # markets were loaded only if they ENDED in the lookback, so older weeks see only long-lived markets and
+    # would drag the weekly rate down ~3x
+    weeks = ["2025-06-02"] * 1 + ["2025-06-09"] * 1 + ["2026-08-03"] * 1 + ["2026-08-10"] * 9 + ["2026-08-17"] * 11 \
+        + ["2026-08-24"] * 1
+    df = frame([{"week": w, "r_x": True} for w in weeks])
+    s = bets_per_week(df, "r_x", since_week="2026-08-03")
+    assert s["weeks"] == 2 and s["median"] == 10.0
