@@ -111,3 +111,30 @@ async def test_a_baseline_sample_of_older_wallets_is_priced_too(tmp_path):
     with HistoryStore(tmp_path / "h.duckdb") as h:
         await build_history(apis, h, CFG, NOW)  # the default sample is large enough to include 0xold's bet
     assert sorted(t0 for _, t0, _ in apis.clob.windows) == [NOW - 20 * DAY, NOW - 19 * DAY]
+
+
+def test_cli_history_builds_the_dataset_and_reports_what_it_fetched(monkeypatch, capsys):
+    from whalescan import cli
+    from whalescan.history import HistoryReport
+
+    async def fake(cfg, **kwargs):
+        return HistoryReport(markets=12, fills=3400, truncated_markets=1, profiles=250, wallet_histories=40,
+                             price_windows=600)
+
+    monkeypatch.setattr(cli, "run_history", fake)
+    assert cli.main(["history"]) == 0
+    out = capsys.readouterr().out
+    assert "12 markets" in out and "3400 fills" in out and "600 price windows" in out and "1 truncated" in out
+
+
+async def test_run_history_opens_the_configured_database(tmp_path):
+    from dataclasses import replace
+
+    from whalescan.config import PathsCfg
+    from whalescan.history import run_history
+
+    cfg = replace(CFG, paths=PathsCfg(research_db=str(tmp_path / "r.duckdb"), scores_parquet=str(tmp_path / "s.pq"),
+                                      snapshot_dir=str(tmp_path / "snap"), ledger_dir=str(tmp_path / "ledger"),
+                                      history_db=str(tmp_path / "history.duckdb")))
+    rep = await run_history(cfg, apis=world(), now=NOW)
+    assert rep.markets == 1 and (tmp_path / "history.duckdb").exists()

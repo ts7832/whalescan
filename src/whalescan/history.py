@@ -159,3 +159,26 @@ async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) 
     log.info("history: %d price windows to fetch", len(windows))
     await _bounded(windows, prices, cfg.http.concurrency)
     return rep
+
+
+async def run_history(cfg: Config, *, apis: Apis | None = None, now: int | None = None) -> HistoryReport:
+    """Open the study database and bring it up to date (safe to re-run: nothing stored is fetched again)."""
+    import time
+
+    from whalescan.api.clob import ClobApi
+    from whalescan.api.data_api import DataApi
+    from whalescan.api.gamma import GammaApi
+    from whalescan.api.http import HttpClient
+
+    now = now or int(time.time())
+    http: HttpClient | None = None
+    if apis is None:
+        http = HttpClient(user_agent=cfg.http.user_agent, rate_per_s=cfg.http.rate_per_s,
+                          max_retries=cfg.http.max_retries, host_rates=cfg.http.host_rates)
+        apis = Apis(DataApi(http), GammaApi(http), ClobApi(http))
+    try:
+        with HistoryStore(cfg.path(cfg.paths.history_db)) as store:
+            return await build_history(apis, store, cfg, now)
+    finally:
+        if http is not None:
+            await http.aclose()
