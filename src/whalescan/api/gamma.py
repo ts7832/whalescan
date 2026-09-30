@@ -75,27 +75,34 @@ class GammaApi:
     async def listed_markets(self, *, closed: bool, end_min_ts: int, end_max_ts: int,
                              min_volume: float) -> list[Market]:
         """Every market whose scheduled end falls in [end_min_ts, end_max_ts], closed or open, with at least
-        `min_volume` traded, across all pages (100 per page)."""
+        `min_volume` traded. Uses /markets/keyset: plain /markets refuses offsets beyond ~2,000 (HTTP 422), and a
+        single week can hold more markets than that. Stops if the API ever repeats a cursor."""
         def iso(ts: int) -> str:
             return datetime.fromtimestamp(ts, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        base = [("closed", "true" if closed else "false"), ("include_tag", "true"), ("limit", CHUNK),
+                ("end_date_min", iso(end_min_ts)), ("end_date_max", iso(end_max_ts)),
+                ("volume_num_min", int(min_volume))]
         out: list[Market] = []
-        offset = 0
+        cursor: str | None = None
+        seen: set[str] = set()
         while True:
-            rows = await self._http.get_json(f"{GAMMA_API}/markets", [
-                ("closed", "true" if closed else "false"), ("include_tag", "true"), ("limit", CHUNK),
-                ("offset", offset), ("end_date_min", iso(end_min_ts)), ("end_date_max", iso(end_max_ts)),
-                ("volume_num_min", int(min_volume))])
+            page = await self._http.get_json(f"{GAMMA_API}/markets/keyset",
+                                             base + ([("after_cursor", cursor)] if cursor else []))
+            rows = page.get("markets") if isinstance(page, dict) else None
             if not isinstance(rows, list):
-                log.warning("gamma returned %s instead of a list", type(rows).__name__)
+                log.warning("gamma keyset returned %s instead of a page", type(page).__name__)
                 self.skipped += 1
                 return out
             markets, skipped = parse_many(rows, parse_market)
             self.skipped += skipped
             out.extend(markets)
-            if len(rows) < CHUNK:
+            if rows and len(out) % (20 * CHUNK) < len(rows):
+                log.info("market listing: %d markets so far", len(out))
+            cursor = page.get("next_cursor")
+            if not rows or not cursor or cursor in seen:
                 return out
-            offset += CHUNK
+            seen.add(cursor)
 
     async def _chunk(self, chunk: list[str], closed: str) -> list | None:
         try:

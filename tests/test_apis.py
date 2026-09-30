@@ -279,22 +279,37 @@ async def test_trades_can_be_read_per_market_with_the_cash_filter():
     assert seen[0] == ("0xc", "1000", None)
 
 
-async def test_gamma_lists_markets_by_end_date_window_across_pages():
+async def test_gamma_lists_markets_by_end_date_window_across_keyset_pages():
+    # Plain /markets refuses offsets beyond ~2,000 (HTTP 422) and a single week can hold more markets than that,
+    # so listing uses /markets/keyset and follows `after_cursor` until the API returns no cursor.
     seen = []
 
     def handler(request):
         q = request.url.params
-        seen.append((q["closed"], q["end_date_min"], q["end_date_max"], q["volume_num_min"], int(q["offset"])))
-        off = int(q["offset"])
-        n = 100 if off < 200 else 17
-        return httpx.Response(200, json=[{"conditionId": f"0x{off + k}", "closed": True, "outcomePrices": "[\"1\",\"0\"]",
-                                          "tags": [{"label": "Politics"}]} for k in range(n)])
+        assert request.url.path == "/markets/keyset" and "offset" not in q
+        seen.append((q["closed"], q["end_date_min"], q["end_date_max"], q["volume_num_min"], q.get("after_cursor")))
+        page = {None: 0, "c1": 1, "c2": 2}[q.get("after_cursor")]
+        n = 100 if page < 2 else 17
+        rows = [{"conditionId": f"0x{page}-{k}", "closed": True, "outcomePrices": "[\"1\",\"0\"]",
+                 "tags": [{"label": "Politics"}]} for k in range(n)]
+        return httpx.Response(200, json={"markets": rows, "next_cursor": {0: "c1", 1: "c2", 2: None}[page]})
 
     ms = await GammaApi(http(handler)).listed_markets(closed=True, end_min_ts=1_780_000_000, end_max_ts=1_790_000_000,
                                                       min_volume=10_000)
     assert len(ms) == 217 and ms[0].tags == ("Politics",)
-    assert [s[4] for s in seen] == [0, 100, 200]
+    assert [s[4] for s in seen] == [None, "c1", "c2"]
     assert seen[0][:4] == ("true", "2026-05-28T20:26:40Z", "2026-09-21T14:13:20Z", "10000")
+
+
+async def test_gamma_listing_stops_if_the_cursor_does_not_advance():
+    # a cursor the API ignores would otherwise return the first page forever
+    def handler(request):
+        return httpx.Response(200, json={"markets": [{"conditionId": "0x1", "closed": True,
+                                                      "outcomePrices": "[\"1\",\"0\"]"}] * 100,
+                                         "next_cursor": "same"})
+
+    ms = await GammaApi(http(handler)).listed_markets(closed=True, end_min_ts=0, end_max_ts=1, min_volume=0)
+    assert len(ms) <= 200
 
 
 async def test_clob_price_window_asks_for_minute_prices_between_two_times():
