@@ -135,6 +135,6 @@ async def test_run_history_opens_the_configured_database(tmp_path):
 
     cfg = replace(CFG, paths=PathsCfg(research_db=str(tmp_path / "r.duckdb"), scores_parquet=str(tmp_path / "s.pq"),
                                       snapshot_dir=str(tmp_path / "snap"), ledger_dir=str(tmp_path / "ledger"),
-                                      history_db=str(tmp_path / "history.duckdb")))
+                                      history_db=str(tmp_path / "history.duckdb"), archive_dir=str(tmp_path / "archive")))
     rep = await run_history(cfg, apis=world(), now=NOW)
     assert rep.markets == 1 and (tmp_path / "history.duckdb").exists()

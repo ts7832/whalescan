@@ -9,6 +9,7 @@ data/*.lock
 data/scores.parquet
 data/ledger/
 data/history/
+data/archive/
 web/node_modules/
 web/dist/
 web/public/data/

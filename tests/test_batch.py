@@ -23,7 +23,7 @@ def config(tmp):
     return replace(base, paths=PathsCfg(research_db=str(tmp / "research.duckdb"),
                                                  scores_parquet=str(tmp / "scores.parquet"),
                                                  snapshot_dir=str(tmp / "snapshot"), ledger_dir=str(tmp / "ledger"),
-                                        history_db=str(tmp / "history.duckdb")))
+                                        history_db=str(tmp / "history.duckdb"), archive_dir=str(tmp / "archive")))
 
 
 class FakeData:

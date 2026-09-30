@@ -156,3 +156,35 @@ def test_a_real_content_conflict_outside_summary_json_aborts_cleanly(tmp_path, b
     assert "UU" not in status.stdout
     rebase_state = subprocess.run(["git", "-C", str(work_b), "status"], capture_output=True, text=True).stdout
     assert "rebase in progress" not in rebase_state
+
+
+def run_on(branch: str, mode: str, work_dir: Path, remote_url: str, depth: str | None = None):
+    env = {"LEDGER_REPO_URL": remote_url, "LEDGER_DIR": str(work_dir), "LEDGER_BRANCH": branch,
+           "PATH": "/usr/bin:/bin:/usr/local/bin", **({"LEDGER_DEPTH": depth} if depth else {})}
+    return subprocess.run(["bash", str(SCRIPT), mode], cwd=work_dir.parent, env=env, capture_output=True, text=True)
+
+
+def test_the_same_script_syncs_the_archive_branch_without_touching_the_ledger(tmp_path, bare_remote):
+    work = tmp_path / "archive"
+    (work / "fills" / "2026-09-30").mkdir(parents=True)
+    (work / "fills" / "2026-09-30" / "100000.jsonl.gz").write_bytes(b"x")
+    assert run_on("archive", "push", work, bare_remote).returncode == 0
+    heads = subprocess.run(["git", "ls-remote", "--heads", bare_remote], capture_output=True, text=True).stdout
+    assert "refs/heads/archive" in heads and "refs/heads/ledger" not in heads
+
+
+def test_a_shallow_clone_can_still_append_and_push(tmp_path, bare_remote):
+    first = tmp_path / "first"
+    first.mkdir()
+    for i in range(3):
+        (first / f"f{i}").write_text(str(i))
+        assert run_on("archive", "push", first, bare_remote).returncode == 0
+    shallow = tmp_path / "shallow"
+    assert run_on("archive", "pull", shallow, bare_remote, depth="1").returncode == 0
+    log = subprocess.run(["git", "-C", str(shallow), "log", "--oneline"], capture_output=True, text=True).stdout
+    assert len(log.strip().splitlines()) == 1  # only the newest commit was downloaded
+    (shallow / "f9").write_text("9")
+    assert run_on("archive", "push", shallow, bare_remote, depth="1").returncode == 0
+    check = tmp_path / "check"
+    subprocess.run(["git", "clone", "-q", "-b", "archive", bare_remote, str(check)], check=True)
+    assert sorted(p.name for p in check.iterdir() if p.name.startswith("f")) == ["f0", "f1", "f2", "f9"]

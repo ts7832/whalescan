@@ -18,6 +18,7 @@ class PathsCfg:
     snapshot_dir: str
     ledger_dir: str
     history_db: str
+    archive_dir: str
 
 
 @dataclass(frozen=True)

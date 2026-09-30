@@ -6,6 +6,7 @@ scores_parquet = "data/scores.parquet"
 snapshot_dir = "data/snapshot"
 ledger_dir = "data/ledger"
 history_db = "data/history.duckdb"
+archive_dir = "data/archive"
 
 [http]
 rate_per_s = 5.0

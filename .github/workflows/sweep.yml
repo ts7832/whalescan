@@ -5,6 +5,7 @@ name: insider-sweep
 # Each sweep publishes its alerts to the `data` branch, which the dashboard reads directly, and its
 # Track Record ledger (every call ever logged, and its outcome) to the `ledger` branch — a real,
 # append-only git history, never force-pushed (unlike `data`, which is a throwaway single commit).
+# Every large fill it reads is also archived for good on the `archive` branch (public on-chain data only).
 on:
   schedule:
     - cron: "7 * * * *"   # off-peak minute; hourly is plenty because every job runs for hours
@@ -34,12 +35,15 @@ jobs:
         run: |
           uv sync --locked
           scripts/ledger-sync.sh pull || echo "::warning::could not pull the ledger; starting this job with what's on disk"
+          export ARCHIVE="LEDGER_BRANCH=archive LEDGER_DIR=data/archive LEDGER_DEPTH=1"
+          env $ARCHIVE scripts/ledger-sync.sh pull || echo "::warning::could not pull the fill archive"
           stop=$((SECONDS + 320 * 60))
           while :; do
             began=$SECONDS
             if uv run whalescan sweep; then
               scripts/publish-data.sh || echo "::warning::publishing alerts failed; next round in 15 min"
               scripts/ledger-sync.sh push || echo "::warning::publishing the ledger failed; next round in 15 min"
+              env $ARCHIVE scripts/ledger-sync.sh push || echo "::warning::publishing the fill archive failed; next round in 15 min"
             else
               echo "::warning::sweep round failed; next round in 15 min"
             fi

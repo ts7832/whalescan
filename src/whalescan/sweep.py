@@ -21,6 +21,7 @@ from whalescan.api.clob import ClobApi
 from whalescan.api.data_api import DataApi
 from whalescan.api.gamma import GammaApi
 from whalescan.api.http import HttpClient
+from whalescan.archive import archive_round
 from whalescan.batch import Apis, _guarded, evaluate_window, git_publish, refresh_markets
 from whalescan.classify import Blocklist
 from whalescan.config import Config
@@ -67,7 +68,14 @@ async def run_sweep(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             since = max(now - window, (last - OVERLAP_S) if last is not None else now - window)
             page = await _guarded(apis.data.trades(min_usdc=cfg.sweep.fill_min_usdc, since_ts=since), "sweep")
             if page is not None:
+                unseen = store.new_trades(page.trades)
                 store.upsert_trades(page.trades)
+                # Permanent archive of every large fill (the store keeps only a rolling 24 h). Secondary: an
+                # archive problem must never stop alerts.
+                try:
+                    archive_round(cfg.path(cfg.paths.archive_dir), unseen, now)
+                except Exception:  # noqa: BLE001
+                    log.exception("fill archive failed; alerts still publish")
                 report.fills, report.complete = len(page.trades), page.complete
                 if not page.complete:
                     log.warning("sweep hit the API depth limit: some fills since %d were not read", since)

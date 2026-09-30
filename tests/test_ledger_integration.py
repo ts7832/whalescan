@@ -22,7 +22,7 @@ def config(tmp):
     base = load_config()
     return replace(base, paths=PathsCfg(research_db=str(tmp / "r.duckdb"), scores_parquet=str(tmp / "s.parquet"),
                                         snapshot_dir=str(tmp / "snap"), ledger_dir=str(tmp / "ledger"),
-                                        history_db=str(tmp / "history.duckdb")))
+                                        history_db=str(tmp / "history.duckdb"), archive_dir=str(tmp / "archive")))
 
 
 class FakeData:
@@ -137,3 +137,30 @@ async def test_a_ledger_error_never_blocks_alert_publishing(tmp_path, caplog):
     assert json.loads((tmp_path / "snap" / "signals.json").read_text())
     assert report.signals == 1
     assert "ledger" in caplog.text.lower()
+
+
+async def test_each_sweep_round_archives_only_fills_it_has_not_seen(tmp_path):
+    from whalescan.archive import read_archive
+
+    cfg = config(tmp_path)
+    first = fresh_bet()
+    await run_sweep(cfg, apis=Apis(FakeData(first), FakeGamma(), FakeClob()), now=NOW)
+    later = Trade("0x2", NOW + 60, "0xother", "yes", "0xc", "BUY", 0.40, 5000.0, "x-happen", "q", "Yes", 0, None)
+    await run_sweep(cfg, apis=Apis(FakeData(first + [later]), FakeGamma(), FakeClob()), now=NOW + 900)
+    assert [t.tx_hash for t in read_archive(tmp_path / "archive")] == ["0x1", "0x2"]  # the re-read 0x1 isn't repeated
+
+
+async def test_an_archive_error_never_blocks_alert_publishing(tmp_path, monkeypatch, caplog):
+    import logging
+
+    from whalescan import sweep
+
+    def broken(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(sweep, "archive_round", broken)
+    cfg = config(tmp_path)
+    with caplog.at_level(logging.ERROR):
+        report = await run_sweep(cfg, apis=Apis(FakeData(fresh_bet()), FakeGamma(), FakeClob()), now=NOW)
+    assert report.signals == 1 and json.loads((tmp_path / "snap" / "signals.json").read_text())
+    assert "archive" in caplog.text.lower()

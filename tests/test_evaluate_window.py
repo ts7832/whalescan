@@ -48,7 +48,7 @@ def config(tmp):
     base = load_config()
     return replace(base, paths=PathsCfg(research_db=str(tmp / "r.duckdb"), scores_parquet=str(tmp / "s.parquet"),
                                         snapshot_dir=str(tmp / "snap"), ledger_dir=str(tmp / "ledger"),
-                                        history_db=str(tmp / "history.duckdb")))
+                                        history_db=str(tmp / "history.duckdb"), archive_dir=str(tmp / "archive")))
 
 
 async def test_a_sub_threshold_fresh_wallet_bet_is_evaluated_and_profiled(tmp_path):
