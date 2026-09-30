@@ -167,6 +167,24 @@ class Store:
             self.con.unregister("_incoming")
         return len(df)
 
+    def new_trades(self, trades: Iterable[Trade]) -> list[Trade]:
+        """The given fills that are not stored yet (by the full fill key), in their original order."""
+        batch = list(trades)
+        if not batch:
+            return []
+        rows = self.con.execute(
+            f"SELECT {', '.join(TRADE_KEY)} FROM trades WHERE list_contains(?, tx_hash)",
+            [sorted({t.tx_hash for t in batch})]).fetchall()
+        known = {tuple(r) for r in rows}
+        seen: set[tuple] = set()
+        out = []
+        for t in batch:
+            key = (t.tx_hash, t.wallet, t.asset, t.side, t.price, t.size)
+            if key not in known and key not in seen:
+                seen.add(key)
+                out.append(t)
+        return out
+
     def upsert_trades(self, trades: Iterable[Trade]) -> int:
         df = pd.DataFrame([astuple(t) for t in trades], columns=TRADE_COLS)
         return self._upsert_frame("trades", df, TRADE_KEY)

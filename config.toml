@@ -5,6 +5,8 @@ research_db = "data/research.duckdb"
 scores_parquet = "data/scores.parquet"
 snapshot_dir = "data/snapshot"
 ledger_dir = "data/ledger"
+history_db = "data/history.duckdb"
+archive_dir = "data/archive"
 
 [http]
 rate_per_s = 5.0
@@ -118,6 +120,26 @@ near_miss_markets_max = 30
 near_miss_usdc_min = 5000
 min_scored = 30
 settlement_grace_days = 7  # a closed market with no clean winner may still be mid-UMA-resolution
+
+[study]
+# Evidence study (see the evidence-study spec): an honest, out-of-sample, per-dollar copy-trade backtest.
+lookback_days = 180            # resolved news markets that closed within this many days
+history_max_age_days = 30      # fetch pre-bet trade history only for wallets younger than this at the bet
+entry_delays_min = [1, 5, 15, 60]
+headline_delay_min = 15        # the 15-minute sweep sees a fill up to 15 min late: the conservative headline
+half_spread = 0.01             # historical order books were not recorded
+train_fraction = 0.667         # rules are chosen on the older 2/3 of bets, scored once on the newest 1/3
+min_wallets = 10
+bootstrap = 2000
+seed = 20260929
+bankroll = 1000
+kelly_fraction = 0.25
+shrink_k = 20                  # pseudo-bets pulling an estimated win rate toward the market price
+max_bet_fraction = 0.05
+max_event_fraction = 0.10
+max_exposure_fraction = 0.60
+max_whale_share = 0.20         # never more than this share of the whale's own position (liquidity)
+baseline_sample = 3000         # price windows for this many non-fresh big bets (the BASELINE rule)
 
 [blocklist]
 slug_patterns = ["updown", "up-or-down", "-(5|15)m-"]

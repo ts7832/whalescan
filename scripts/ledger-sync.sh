@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Sync data/ledger/ (a working clone of the `ledger` branch) with its remote.
+# Sync a working clone of an append-only data branch (default: data/ledger <-> `ledger`) with its remote.
+# Also used for the `archive` branch (every large fill ever read).
 #
 # Unlike scripts/publish-data.sh, this NEVER force-pushes: the ledger's history is the permanent,
 # append-only audit trail of every call WHALESCAN has made (Track Record spec §5, §9). A concurrent
@@ -8,6 +9,8 @@
 # Env overrides (used by tests to run fully isolated, against a local bare repo instead of GitHub):
 #   LEDGER_REPO_URL — the remote to sync with (default: GITHUB_TOKEN/GITHUB_REPOSITORY, else `origin`)
 #   LEDGER_DIR       — the local working clone (default: data/ledger, relative to the repo root)
+#   LEDGER_BRANCH    — the branch to sync (default: ledger)
+#   LEDGER_DEPTH     — clone only this many recent commits (the archive grows for ever; CI needs none of its past)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,23 +29,26 @@ if [ -z "$url" ]; then
   fi
 fi
 dir="${LEDGER_DIR:-data/ledger}"
+branch="${LEDGER_BRANCH:-ledger}"
+depth=()
+if [ -n "${LEDGER_DEPTH:-}" ]; then depth=(--depth "$LEDGER_DEPTH"); fi
 
 if [ ! -d "$dir/.git" ]; then
   mkdir -p "$(dirname "$dir")"
   set +e
-  git ls-remote --exit-code --heads "$url" ledger >/dev/null 2>&1
+  git ls-remote --exit-code --heads "$url" "$branch" >/dev/null 2>&1
   ls_remote_status=$?
   set -e
   if [ "$ls_remote_status" -eq 0 ]; then
-    git clone -q -b ledger --single-branch "$url" "$dir"
+    git clone -q ${depth[@]+"${depth[@]}"} -b "$branch" --single-branch "$url" "$dir"
   elif [ "$ls_remote_status" -eq 2 ]; then
-    # exit code 2 specifically means "reachable, but the ledger branch doesn't exist yet" (first run ever).
+    # exit code 2 specifically means "reachable, but the branch doesn't exist yet" (first run ever).
     # Any OTHER failure (network, auth, a bad URL) must not be treated the same way: silently starting a
     # fresh, disconnected history would re-log every open call at today's price and fight the real branch
     # on the next push.
-    git init -q -b ledger "$dir"
+    git init -q -b "$branch" "$dir"
   else
-    echo "ledger-sync: could not reach $url (ls-remote exit $ls_remote_status); not initialising a fresh ledger" >&2
+    echo "ledger-sync: could not reach $url (ls-remote exit $ls_remote_status); not initialising a fresh $branch" >&2
     exit 1
   fi
   git -C "$dir" config user.name whalescan-bot
@@ -55,7 +61,7 @@ else
 fi
 
 if [ "$mode" = pull ]; then
-  git -C "$dir" fetch -q origin ledger 2>/dev/null && git -C "$dir" merge -q --ff-only origin/ledger || true
+  git -C "$dir" fetch -q origin "$branch" 2>/dev/null && git -C "$dir" merge -q --ff-only "origin/$branch" || true
   exit 0
 fi
 
@@ -64,14 +70,14 @@ git -C "$dir" add -A
 if git -C "$dir" diff --cached --quiet; then
   exit 0  # nothing changed: no empty commit
 fi
-git -C "$dir" commit -q -m "ledger $(date -u +%Y-%m-%dT%H:%MZ)"
+git -C "$dir" commit -q -m "$branch $(date -u +%Y-%m-%dT%H:%MZ)"
 for _ in 1 2 3; do
-  if git -C "$dir" push -q origin ledger:ledger 2>/dev/null; then
+  if git -C "$dir" push -q origin "$branch:$branch" 2>/dev/null; then
     exit 0
   fi
-  git -C "$dir" fetch -q origin ledger
+  git -C "$dir" fetch -q origin "$branch"
   set +e
-  git -C "$dir" rebase -q origin/ledger 2>/dev/null
+  git -C "$dir" rebase -q "origin/$branch" 2>/dev/null
   rebase_status=$?
   set -e
   if [ "$rebase_status" -ne 0 ]; then
