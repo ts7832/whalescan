@@ -141,6 +141,17 @@ max_exposure_fraction = 0.60
 max_whale_share = 0.20         # never more than this share of the whale's own position (liquidity)
 baseline_sample = 3000         # price windows for this many non-fresh big bets (the BASELINE rule)
 
+[finder]
+# Insider Finder v2 (see the 2026-09-30 spec): wallets whose big bets are repeatedly followed by the price
+# moving their way before the market catches on — "informed", not "new".
+min_usdc = 5000
+min_bets = 5
+min_z = 2.33
+move_points = 0.20
+move_fraction_to_one = 0.5
+move_window_h = 24
+demote_after = 5
+
 [blocklist]
 slug_patterns = ["updown", "up-or-down", "-(5|15)m-"]
 min_market_volume = 10000

@@ -158,6 +158,17 @@ class StudyCfg:
 
 
 @dataclass(frozen=True)
+class FinderCfg:
+    min_usdc: float
+    min_bets: int
+    min_z: float
+    move_points: float
+    move_fraction_to_one: float
+    move_window_h: float
+    demote_after: int
+
+
+@dataclass(frozen=True)
 class BlocklistCfg:
     slug_patterns: tuple[str, ...]
     min_market_volume: float
@@ -181,6 +192,7 @@ class Config:
     insider: InsiderCfg
     ledger: LedgerCfg
     study: StudyCfg
+    finder: FinderCfg
     validation: ValidationCfg
     blocklist: BlocklistCfg
     categories: CategoriesCfg
@@ -219,6 +231,7 @@ def load_config(path: Path | None = None) -> Config:
         insider=_section(InsiderCfg, "insider", raw["insider"]),
         ledger=_section(LedgerCfg, "ledger", raw["ledger"]),
         study=_section(StudyCfg, "study", raw["study"]),
+        finder=_section(FinderCfg, "finder", raw["finder"]),
         validation=_section(ValidationCfg, "validation", raw["validation"]),
         blocklist=_section(BlocklistCfg, "blocklist", raw["blocklist"]),
         categories=CategoriesCfg(
