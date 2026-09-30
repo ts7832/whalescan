@@ -29,6 +29,8 @@ later bets — e.g. wallets repeatedly winning recurring MicroStrategy (MSTR) pu
 - **Confirmed from:** the resolution time of that market (earlier, nobody could know it was right) — no look-ahead.
 - **Followed:** every later big buy (≥ $5,000, entered strictly after the confirmation time) by a confirmed wallet,
   in any studied market, whatever the wallet's age by then; the confirming bet itself is never scored.
-- **Reported** exactly like S1–S4. If MSTR-type corporate-announcement markets turn out to be missing from the
-  dataset (tagged outside the news categories), they are added to the dataset first and the rule is run once on
-  the extended data; the addition is reported.
+- **Reported** exactly like S1–S4, on the existing dataset (no market-specific additions).
+- **Amendment 2026-09-30 (before evaluation):** the user clarified that MicroStrategy was only an example of the
+  general principle — no market-specific search. The principle for the product: a wallet whose insider call is
+  proven right is watched permanently, its later bets are labelled as a confirmed-insider call, and it stays on
+  the list until its own later results show no edge.
