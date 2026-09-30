@@ -128,6 +128,21 @@ def test_days_held_run_from_entry_to_resolution(store):
     assert r["days_held_5"] == pytest.approx((NOW - 10 * DAY - (T + 5 * MIN)) / DAY)
 
 
+def test_days_to_end_uses_the_scheduled_end_known_at_the_bet_not_the_actual_resolution(store):
+    # "Will X happen by <date>?" markets resolve EARLY mostly when X happens: filtering on the actual resolution
+    # time would quietly select winners. A horizon rule may only use the scheduled end date.
+    from dataclasses import replace as _replace
+    early = _replace(mk("0xearly"), end_ts=T + 60 * DAY, closed_ts=T + 2 * DAY)
+    store.upsert_markets([early], NOW)
+    store.register_markets(["0xearly"], is_open=False)
+    store.upsert_trades([fill("a", T, "0xw", "0xearly", 30_000)])
+    store.upsert_profiles([WalletProfile("0xw", T - 900 * DAY, None, NOW)])
+    store.upsert_prices("0xearly-y", [(T + 30, 0.40)])
+    r = row(bets_frame(store, CFG), "0xw", "0xearly")
+    assert r["days_to_end"] == pytest.approx(60.0)
+    assert r["days_held_5"] == pytest.approx((2 * DAY - 5 * MIN) / DAY)  # capital lock-up still uses reality
+
+
 def test_small_buys_are_not_bets(store):
     store.upsert_trades([fill("a", T, "0xsmall", "0xpol", 2_000)])
     df = bets_frame(store, CFG)

@@ -15,6 +15,7 @@ from whalescan.api.http import BlockedError
 from whalescan.batch import BatchReport, run_batch
 from whalescan.config import load_config
 from whalescan.history import run_history
+from whalescan.study_report import run_study
 from whalescan.ledger_runner import ledger_status
 from whalescan.live import Station
 from whalescan.sweep import run_sweep
@@ -53,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     sw = sub.add_parser("sweep", help="15-minute insider sweep: every large fill since the last sweep")
     sw.add_argument("--publish", action="store_true", help="git commit + push data/snapshot afterwards")
     sub.add_parser("history", help="evidence study: rebuild months of large news-market bets (incremental)")
+    sub.add_parser("study", help="evidence study: out-of-sample, per-dollar, sized copy-trade report (local)")
     sub.add_parser("ledger", help="run one sweep round (updates the Track Record ledger too) and report its state; "
                                   "run standalone any time, including once to seed the ledger from live alerts")
     live = sub.add_parser("live", help="real-time station + dashboard on http://127.0.0.1:8765")
@@ -89,6 +91,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"history: {h.markets} markets · {h.fills} fills ({h.truncated_markets} truncated at the API depth "
                   f"limit) · {h.profiles} profiles · {h.wallet_histories} wallet histories · {h.price_windows} "
                   f"price windows fetched")
+            return 0
+        if args.cmd == "study":
+            res = run_study(cfg)
+            h = res["headline"]
+
+            def pct(x: float | None) -> str:
+                return "—" if x is None else f"{x:+.1%}"
+
+            print(f"study: {h['rule']} entering {h['delay_min']} min after the whale, out of sample: "
+                  f"{pct(h.get('mean_return'))} per dollar (90% CI {pct(h.get('ci_lo'))} to {pct(h.get('ci_hi'))}), "
+                  f"{h.get('n_bets', 0)} bets from {h.get('n_wallets', 0)} wallets · "
+                  f"{'GO: paper-trade forward' if res['verdict']['go'] else 'NO-GO'}")
+            print(f"report: {res['paths']['markdown']}")
             return 0
         if args.cmd == "ledger":
             r = asyncio.run(run_sweep(cfg))  # a sweep round also logs calls and advances marks

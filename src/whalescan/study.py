@@ -146,6 +146,9 @@ def bets_frame(store: HistoryStore, cfg: Config) -> pd.DataFrame:
             "markets_at_bet": math.nan if at_bet is None else at_bet,
             "is_open": not m.closed, "payout": math.nan if payout is None else payout, "irregular": irregular,
             "won": payout == 1.0, "resolved_ts": resolved,
+            # the SCHEDULED end, known at the bet: rules may filter on this, never on the actual resolution time
+            # ("will X happen by <date>" markets resolve early mostly when X happens)
+            "days_to_end": (m.end_ts - t) / DAY if m.end_ts else math.nan,
             "r_insider": all(checks[c].passed for c in INSIDER_CODES) and in_band,
             "missed_rule": near_miss_rule(ev_at_bet, profile_at_bet, ic, cfg.ledger),
             "r_fresh": age is not None and age <= sc.history_max_age_days and in_band,
