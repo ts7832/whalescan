@@ -12,7 +12,7 @@ import numpy as np
 
 from whalescan.config import Config
 
-KINDS = ("INSIDER", "SNIPER", "NEAR_MISS")
+KINDS = ("INSIDER", "SNIPER", "NEAR_MISS", "CONFIRMED")
 FEATURES = ("age_days", "markets_traded", "usdc", "consensus")
 MODEL_MIN_SCORED = 200
 CV_FOLDS = 5

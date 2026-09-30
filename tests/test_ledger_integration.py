@@ -164,3 +164,39 @@ async def test_an_archive_error_never_blocks_alert_publishing(tmp_path, monkeypa
         report = await run_sweep(cfg, apis=Apis(FakeData(fresh_bet()), FakeGamma(), FakeClob()), now=NOW)
     assert report.signals == 1 and json.loads((tmp_path / "snap" / "signals.json").read_text())
     assert "archive" in caplog.text.lower()
+
+
+async def test_a_confirmed_wallets_new_bet_produces_a_badged_alert_and_a_confirmed_ledger_call(tmp_path):
+    cfg = config(tmp_path)
+    ledger_dir = tmp_path / "ledger"
+    ledger_dir.mkdir(parents=True)
+    led = Ledger(ledger_dir)
+    # a proven insider: an earlier call that already settled as a clean win, strictly before `now`
+    led.append_call({"id": "old:INSIDER", "kind": "INSIDER", "wallet": "0xproven", "outcome_index": 0,
+                     "call_ts": NOW - 20 * DAY, "condition_id": "0xold", "asset": "old-y", "question": "old?",
+                     "category": "POLITICS", "tier": "B", "entry_cost": 0.4, "missed_rule": None})
+    led.append_mark({"call_id": "old:INSIDER", "type": "SETTLEMENT", "at": NOW - 10 * DAY, "return_pct": 0.5,
+                     "irregular": False})
+
+    # 0xproven is now an OLD, high-market-count account — it would never pass the ordinary insider checks —
+    # but its confirmed status must still raise a badged alert on its next big buy.
+    bet = [Trade("0x1", NOW - 600, "0xproven", "yes", "0xc", "BUY", 0.40, 30_000.0 / 0.40, "x-happen", "q", "Yes",
+                 0, None)]
+
+    class OldGamma(FakeGamma):
+        async def created_ts(self, wallet):
+            return NOW - 900 * DAY
+
+    class OldData(FakeData):
+        async def markets_traded(self, wallet):
+            return 500
+
+    apis = Apis(OldData(bet), OldGamma(), FakeClob())
+    await run_sweep(cfg, apis=apis, now=NOW)
+
+    signals = json.loads((tmp_path / "snap" / "signals.json").read_text())
+    confirmed_alerts = [s for s in signals if s["kind"] == "CONFIRMED"]
+    assert len(confirmed_alerts) == 1 and confirmed_alerts[0]["wallet"] == "0xproven"
+
+    calls = Ledger(ledger_dir).calls()
+    assert any(c["kind"] == "CONFIRMED" and c["wallet"] == "0xproven" for c in calls)

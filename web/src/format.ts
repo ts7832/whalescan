@@ -46,6 +46,9 @@ export function insiderBadge(s: Signal): string {
 
 export const shortWallet = (w: string): string => `${w.slice(0, 6)}…${w.slice(-4)}`;
 
+/** A confirmed-insider watchlist alert: a wallet whose earlier call already settled as a proven win. */
+export const confirmedBadge = (): string => 'CONFIRMED INSIDER · PROVEN WALLET';
+
 export function signalsEmptyMessage(meta: Meta): string {
   const c = meta.counts.certified_wallets;
   if (c === 0) return 'NO INSIDER OR SNIPER ALERTS · WATCHING FOR FRESH-ACCOUNT WHALES';

@@ -17,6 +17,7 @@ from whalescan.config import Config
 from whalescan.finder_math import is_covered, known_at, move_hit
 from whalescan.history import signal_ts, study_events
 from whalescan.history_store import HistoryStore
+from whalescan.ledger import Ledger
 from whalescan.study import _payout, _week
 from whalescan.study_math import copy_entry, copy_return
 
@@ -158,3 +159,35 @@ def qualify(moves: pd.DataFrame, rates: dict[str, float], min_bets: int, min_z: 
             z = (h_sum - e_sum) / math.sqrt(v_sum)
             result.loc[idx] = bool(z >= min_z)
     return result
+
+
+CONFIRMING_KINDS = ("INSIDER", "NEAR_MISS", "INFORMED")
+
+
+def confirmed_wallets(ledger: Ledger, now: int, cfg: Config) -> set[str]:
+    """Wallets whose Track Record shows a settled, clean WIN on an INSIDER/NEAR_MISS/INFORMED call that
+    resolved strictly before `now` (spec §1: CONFIRMED INSIDER). A wallet is removed once it has accumulated
+    at least [finder].demote_after settled CONFIRMED-kind calls of its own (its live track record since being
+    confirmed) whose mean per-dollar return is negative."""
+    fc = cfg.finder
+    calls = {c["id"]: c for c in ledger.calls()}
+    settled = {m["call_id"]: m for m in ledger.marks() if m["type"] == "SETTLEMENT"}
+
+    confirmed: set[str] = set()
+    for cid, c in calls.items():
+        if c["kind"] not in CONFIRMING_KINDS:
+            continue
+        m = settled.get(cid)
+        if m is None or m.get("irregular") or m["at"] >= now:
+            continue
+        if m["return_pct"] is not None and m["return_pct"] > 0:
+            confirmed.add(c["wallet"])
+
+    demoted: set[str] = set()
+    for wallet in confirmed:
+        later = [settled[cid]["return_pct"] for cid, c in calls.items()
+                 if c["wallet"] == wallet and c["kind"] == "CONFIRMED" and cid in settled
+                 and not settled[cid].get("irregular") and settled[cid]["return_pct"] is not None]
+        if len(later) >= fc.demote_after and sum(later) / len(later) < 0:
+            demoted.add(wallet)
+    return confirmed - demoted

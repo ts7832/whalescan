@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { fmtAge, fmtCents, fmtPrice, fmtUsd, insiderBadge, isSnapshotStale, signalsEmptyMessage } from '../format';
+import { confirmedBadge, fmtAge, fmtCents, fmtPrice, fmtUsd, insiderBadge, isSnapshotStale, signalsEmptyMessage } from '../format';
 import type { Meta, Signal } from '../types';
 import { Panel } from './Panel';
 
@@ -44,14 +44,17 @@ export function SignalsPanel({ signals, selectedId, onSelect, meta, now, categor
 function SignalCard({ s, selected, onSelect, now }: { s: Signal; selected: boolean; onSelect: () => void; now: number }) {
   const bookAge = s.quote ? now - s.quote.book_as_of : null;
   const insider = s.kind === 'INSIDER';
+  const confirmed = s.kind === 'CONFIRMED';
+  const label = confirmed ? 'CONFIRMED' : insider ? 'INSIDER' : 'SNIPER';
   return (
-    <button className={`signal tier-${s.tier} ${insider ? 'is-insider' : ''} ${s.status === 'STALE' ? 'is-stale-signal' : ''} ${selected ? 'selected' : ''}`} onClick={onSelect}>
+    <button className={`signal tier-${s.tier} ${insider ? 'is-insider' : ''} ${confirmed ? 'is-confirmed' : ''} ${s.status === 'STALE' ? 'is-stale-signal' : ''} ${selected ? 'selected' : ''}`} onClick={onSelect}>
       <div className="row">
-        <span className={`tier tier-${s.tier}`}>{insider ? 'INSIDER' : 'SNIPER'} · TIER {s.tier ?? '—'}</span>
+        <span className={`tier tier-${s.tier}`}>{label}{s.tier ? ` · TIER ${s.tier}` : ''}</span>
         <span className="dim">{s.category}</span>
         <span className="dim right">{fmtAge(now - s.last_ts)} AGO</span>
       </div>
       {insider && <div className="insider-badge">{insiderBadge(s)}</div>}
+      {confirmed && <div className="insider-badge">{confirmedBadge()}</div>}
       <div className="question">{s.question}</div>
       <div className="row">
         <span>BUY <b>{s.outcome.toUpperCase()}</b></span>

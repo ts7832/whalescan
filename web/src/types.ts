@@ -15,7 +15,7 @@ export interface Quote {
 export interface Signal {
   id: string;
   /** INSIDER = fresh-account big bet (primary signal); SKILL = proven sniper */
-  kind?: 'INSIDER' | 'SKILL';
+  kind?: 'INSIDER' | 'SKILL' | 'CONFIRMED';
   status: Status;
   tier: 'A' | 'B' | null;
   category: string;

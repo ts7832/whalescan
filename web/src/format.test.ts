@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fmtAge, fmtCents, fmtP, fmtPrice, fmtReturn, fmtUsd, shortWallet, signalsEmptyMessage } from './format';
+import { confirmedBadge, fmtAge, fmtCents, fmtP, fmtPrice, fmtReturn, fmtUsd, shortWallet, signalsEmptyMessage } from './format';
 import type { Meta } from './types';
 
 const meta = (certified: number): Meta => ({
@@ -72,5 +72,11 @@ describe('fmtReturn', () => {
     expect(fmtReturn(1.33)).toBe('+133.0%');
     expect(fmtReturn(-0.5)).toBe('−50.0%');
     expect(fmtReturn(null)).toBe('—');
+  });
+});
+
+describe('confirmedBadge', () => {
+  it('labels a confirmed-insider watchlist alert', () => {
+    expect(confirmedBadge()).toBe('CONFIRMED INSIDER · PROVEN WALLET');
   });
 });

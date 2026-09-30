@@ -16,7 +16,10 @@ from typing import Any
 
 from whalescan.batch import Apis, WindowResult, _guarded
 from whalescan.book import follow_quote
+from whalescan.classify import Blocklist
 from whalescan.config import Config
+from whalescan.finder import confirmed_wallets
+from whalescan.finder_math import is_covered
 from whalescan.gate import Evaluation
 from whalescan.insider import account_age_days, near_miss_rule
 from whalescan.ledger import Ledger
@@ -92,26 +95,48 @@ def _build_call(call_id: str, kind: str, missed_rule: str | None, e: Evaluation,
     }
 
 
+async def _record_one(ledger: Ledger, kind: str, missed_rule: str | None, e: Evaluation, profile: Any,
+                      market: Any, apis: Apis, cfg: Config, now: int) -> bool:
+    """Log one call of `kind` for this evaluation, unless it (or an earlier call of the same kind for the same
+    wallet+asset) is already logged. Returns whether a new row was written."""
+    call_id = f"{e.event.id}:{kind}"
+    if ledger.has_call(call_id) or ledger.has_call_for(e.event.wallet, e.event.asset, kind):
+        return False
+    vwap, complete = await _entry_quote(apis, cfg, e.event.asset)
+    if complete:
+        entry_vwap, entry_estimated = vwap, False
+    else:
+        entry_vwap, entry_estimated = e.event.price + cfg.validation.slippage, True
+    ledger.append_call(_build_call(call_id, kind, missed_rule, e, profile, market, entry_vwap, entry_estimated,
+                                   cfg, now))
+    return True
+
+
 async def record_calls(ledger: Ledger, result: WindowResult, apis: Apis, cfg: Config, now: int) -> int:
-    """Log any new call surfaced by this evaluation window. Returns how many were logged."""
+    """Log any new call surfaced by this evaluation window — the insider/sniper/near-miss ladder, and,
+    separately, any big buy by a wallet on the confirmed-insider watchlist (Insider Finder v2 spec §4): a
+    distinct signal path that fires whether or not the same bet also passes the insider/sniper checks, so the
+    same event can produce two calls. Returns how many new rows were written."""
     logged = 0
+    confirmed = confirmed_wallets(ledger, now, cfg)
+    blocklist = Blocklist(cfg.blocklist)
+
     for e in result.evaluations:
-        kind_rule = _call_kind(e, result.profiles.get(e.event.wallet), cfg)
+        profile = result.profiles.get(e.event.wallet)
+        market = result.markets.get(e.event.condition_id)
+
+        if (confirmed and e.event.wallet in confirmed and e.event.side == "BUY"
+                and e.event.usdc >= cfg.finder.min_usdc and market is not None
+                and is_covered(market, cfg, blocklist)
+                and await _record_one(ledger, "CONFIRMED", None, e, profile, market, apis, cfg, now)):
+            logged += 1
+
+        kind_rule = _call_kind(e, profile, cfg)
         if kind_rule is None:
             continue
         kind, missed_rule = kind_rule
-        call_id = f"{e.event.id}:{kind}"
-        if ledger.has_call(call_id) or ledger.has_call_for(e.event.wallet, e.event.asset, kind):
-            continue
-        market = result.markets.get(e.event.condition_id)
-        vwap, complete = await _entry_quote(apis, cfg, e.event.asset)
-        if complete:
-            entry_vwap, entry_estimated = vwap, False
-        else:
-            entry_vwap, entry_estimated = e.event.price + cfg.validation.slippage, True
-        ledger.append_call(_build_call(call_id, kind, missed_rule, e, result.profiles.get(e.event.wallet), market,
-                                       entry_vwap, entry_estimated, cfg, now))
-        logged += 1
+        if await _record_one(ledger, kind, missed_rule, e, profile, market, apis, cfg, now):
+            logged += 1
     return logged
 
 

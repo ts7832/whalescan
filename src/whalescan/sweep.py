@@ -25,10 +25,13 @@ from whalescan.archive import archive_round
 from whalescan.batch import Apis, _guarded, evaluate_window, git_publish, refresh_markets
 from whalescan.classify import Blocklist
 from whalescan.config import Config
+from whalescan.finder import confirmed_wallets
+from whalescan.finder_math import is_covered
 from whalescan.gate import ScoreBook
+from whalescan.ledger import Ledger
 from whalescan.ledger_runner import run_ledger_round
 from whalescan.scoring import SCORE_COLUMNS
-from whalescan.snapshot import write_json_atomic
+from whalescan.snapshot import evaluation_json, write_json_atomic
 from whalescan.store import Store
 
 log = logging.getLogger(__name__)
@@ -87,6 +90,27 @@ async def run_sweep(cfg: Config, *, apis: Apis | None = None, now: int | None = 
             book = ScoreBook.for_config(scores, cfg)
             result = await evaluate_window(apis, store, cfg, book, Blocklist(cfg.blocklist), now, now - window)
             signals, contacts = result.signals, result.contacts
+
+            # Confirmed-insider watchlist (Insider Finder v2 spec §4): any big buy by a wallet whose earlier
+            # call was already proven right, in any covered market — a distinct alert even when the bet alone
+            # wouldn't pass the insider/sniper checks. Secondary: never let this block the primary alerts.
+            try:
+                confirmed = confirmed_wallets(Ledger(cfg.path(cfg.paths.ledger_dir)), now, cfg)
+                if confirmed:
+                    fblocklist = Blocklist(cfg.blocklist)
+                    names = {w: s.name for w, s in store.wallet_state().items()}
+                    badged = []
+                    for e in result.evaluations:
+                        m = result.markets.get(e.event.condition_id)
+                        if (e.event.wallet in confirmed and e.event.side == "BUY"
+                                and e.event.usdc >= cfg.finder.min_usdc and m is not None
+                                and is_covered(m, cfg, fblocklist)):
+                            j = evaluation_json(e, m, names, None)
+                            j["kind"] = "CONFIRMED"
+                            badged.append(j)
+                    signals = badged + signals
+            except Exception:  # noqa: BLE001
+                log.exception("confirmed-insider badging failed; alerts still publish")
 
             # Track Record: log any new call this window surfaced and advance every open call's marks.
             # A secondary feature must never be able to break the primary one — guard it and move on.
