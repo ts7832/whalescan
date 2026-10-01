@@ -59,6 +59,20 @@ async def test_retry_after_header_is_respected():
     assert sleeps.calls == [7.0]
 
 
+async def test_a_tiny_retry_after_never_shrinks_below_the_exponential_backoff_floor():
+    # Polymarket's Gamma API has been observed sending "Retry-After: 0" on a 429 — honoring that literally
+    # turns backoff into an immediate-retry storm that only makes the rate limit worse.
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(429, headers={"Retry-After": "0"}) if calls["n"] < 3 else httpx.Response(200, json=1)
+
+    sleeps = Sleeps()
+    assert await client(handler, sleeps).get_json("https://x.test/") == 1
+    assert sleeps.calls == [0.5, 1.0]  # the usual exponential floor, not [0.0, 0.0]
+
+
 async def test_gives_up_after_max_retries():
     c = client(lambda r: httpx.Response(500, text="boom"), retries=2)
     with pytest.raises(ApiError, match="giving up"):

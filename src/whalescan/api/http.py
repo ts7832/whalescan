@@ -117,7 +117,8 @@ class HttpClient:
                 wait = _retry_after(r)
             self.errors += 1
             if attempt < self._max_retries:
-                delay = wait if wait is not None else self._backoff * 2**attempt
+                floor = self._backoff * 2**attempt
+                delay = max(wait, floor) if wait is not None else floor
                 log.info("retrying %s in %.1fs (%s)", url, delay, last)
                 await self._sleep(delay)
         raise ApiError(f"giving up on {url} after {self._max_retries + 1} attempts: {last}")
