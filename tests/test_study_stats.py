@@ -113,3 +113,39 @@ def test_bets_per_week_can_be_limited_to_the_weeks_the_study_actually_covers():
     df = frame([{"week": w, "r_x": True} for w in weeks])
     s = bets_per_week(df, "r_x", since_week="2026-08-03")
     assert s["weeks"] == 2 and s["median"] == 10.0
+
+
+def test_bets_per_period_buckets_by_period_days_from_the_earliest_covered_bet():
+    from whalescan.study_stats import bets_per_period
+
+    # 4 periods of 10 days: 3, 5, 0, 2 qualifying bets (first/last periods dropped as partial by construction
+    # here all periods are full since every period has exactly 10 days of data)
+    rows = []
+    t0 = 1_780_000_000
+    counts = [3, 5, 0, 2, 4]  # 5 periods: first and last get dropped, leaving [5, 0, 2]
+    for i, n in enumerate(counts):
+        for k in range(n):
+            rows.append({"signal_ts": t0 + i * 10 * 86400 + k * 100, "r_x": True})
+    df = pd.DataFrame(rows)
+    s = bets_per_period(df, "r_x", period_days=10)
+    assert s["periods"] == 3 and s["period_days"] == 10
+    assert s["median"] == 2.0 and s["min"] == 0 and s["max"] == 5
+
+
+def test_bets_per_period_respects_a_since_ts_floor():
+    from whalescan.study_stats import bets_per_period
+
+    t0 = 1_780_000_000
+    rows = [{"signal_ts": t0 + i * 86400, "r_x": True} for i in range(40)]  # 40 daily bets
+    df = pd.DataFrame(rows)
+    s = bets_per_period(df, "r_x", period_days=10, since_ts=t0 + 10 * 86400)
+    # from the floor onward: 30 days of data -> 3 periods, first/last dropped -> 1 full period
+    assert s["periods"] == 1
+
+
+def test_bets_per_period_with_too_little_data_reports_zero_periods():
+    from whalescan.study_stats import bets_per_period
+
+    df = pd.DataFrame([{"signal_ts": 1_780_000_000, "r_x": True}])
+    s = bets_per_period(df, "r_x", period_days=91)
+    assert s["periods"] == 0 and s["median"] is None

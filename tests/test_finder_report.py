@@ -78,6 +78,15 @@ def test_go_no_go_says_go_when_every_check_passes():
     assert res["verdict"]["go"] is True, res["verdict"]
 
 
+def test_bets_per_quarter_and_half_year_are_reported_alongside_weekly():
+    # a rare signal (min_bets=10, min_z=2.33 or the stricter 5/3 variant) can show many zero WEEKS even while
+    # firing reliably over a quarter or half a year — report the coarser cadence too.
+    res = finder_results(moves(per_wallet=60), CFG_FAST)
+    assert "bets_per_quarter" in res and "bets_per_half_year" in res
+    for key, days in (("bets_per_quarter", 91), ("bets_per_half_year", 182)):
+        assert res[key]["period_days"] == days
+
+
 def test_outputs_are_strict_json_and_markdown(tmp_path):
     df = moves()
     res = finder_results(df, CFG_FAST)
@@ -88,7 +97,7 @@ def test_outputs_are_strict_json_and_markdown(tmp_path):
 
     json.loads(paths["json"].read_text(), parse_constant=reject)
     md = paths["markdown"].read_text()
-    for section in ("Headline", "Variants", "Bets per week", "Go / no-go"):
+    for section in ("Headline", "Variants", "How often this fires", "Go / no-go"):
         assert section in md
 
 

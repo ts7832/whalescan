@@ -18,7 +18,9 @@ import pandas as pd
 from whalescan.config import Config
 from whalescan.finder import base_rates, qualify
 from whalescan.snapshot import write_json_atomic
-from whalescan.study_stats import bets_per_week, rule_summary, time_split
+from whalescan.study_stats import bets_per_period, bets_per_week, rule_summary, time_split
+
+QUARTER_DAYS, HALF_YEAR_DAYS = 91, 182
 
 VARIANTS = [(5, 2.33), (10, 2.33), (5, 3.0)]  # spec §1, pre-registered — never tuned on results
 
@@ -65,7 +67,13 @@ def finder_results(df: pd.DataFrame, cfg: Config) -> dict[str, Any]:
     # long-lived markets and understate the true rate (same trap the evidence study hit) — restrict to covered weeks.
     covered_from = datetime.fromtimestamp(int(df["signal_ts"].max()) - sc.lookback_days * 86400, UTC).date()
     since_week = (covered_from - timedelta(days=covered_from.weekday())).isoformat() if len(df) else None
+    since_ts = int(datetime(covered_from.year, covered_from.month, covered_from.day,
+                            tzinfo=UTC).timestamp()) if len(df) else None
     week_rate = bets_per_week(df, primary_col, since_week=since_week)
+    # A rare signal (especially the stricter variants) can show many zero WEEKS even while firing reliably
+    # over a longer span — the weekly number alone understates how often it really fires.
+    quarter_rate = bets_per_period(df, primary_col, period_days=QUARTER_DAYS, since_ts=since_ts)
+    half_year_rate = bets_per_period(df, primary_col, period_days=HALF_YEAR_DAYS, since_ts=since_ts)
 
     checks = [
         {"check": "Out-of-sample return per dollar after costs is positive", "passed": (headline.get("mean_return") or -1) > 0},
@@ -81,6 +89,8 @@ def finder_results(df: pd.DataFrame, cfg: Config) -> dict[str, Any]:
         "headline": headline,
         "verdict": {"go": all(c["passed"] for c in checks), "checks": checks},
         "bets_per_week": week_rate,
+        "bets_per_quarter": quarter_rate,
+        "bets_per_half_year": half_year_rate,
         "variants": variants,
     }
 
@@ -100,9 +110,18 @@ def render_markdown(res: dict[str, Any]) -> str:
         "## Go / no-go", "",
         f"**{'GO' if res['verdict']['go'] else 'NO-GO'}**", "",
         *[f"- [{'x' if c['passed'] else ' '}] {c['check']}" for c in res["verdict"]["checks"]], "",
-        "## Bets per week", "",
-        f"median {res['bets_per_week'].get('median')} · min {res['bets_per_week'].get('min')} · "
-        f"max {res['bets_per_week'].get('max')} · {res['bets_per_week'].get('weeks')} weeks", "",
+        "## How often this fires", "",
+        "A rare signal can show many zero-count weeks even while firing reliably over a longer span — all "
+        "three cadences below use the same (primary-variant) calls.", "",
+        "| Cadence | median | min | max | periods |", "|---|---|---|---|---|",
+        f"| per week | {res['bets_per_week'].get('median')} | {res['bets_per_week'].get('min')} | "
+        f"{res['bets_per_week'].get('max')} | {res['bets_per_week'].get('weeks')} |",
+        f"| per quarter (~91d) | {res['bets_per_quarter'].get('median')} | {res['bets_per_quarter'].get('min')} | "
+        f"{res['bets_per_quarter'].get('max')} | {res['bets_per_quarter'].get('periods')} |",
+        f"| per half year (~182d) | {res['bets_per_half_year'].get('median')} | "
+        f"{res['bets_per_half_year'].get('min')} | {res['bets_per_half_year'].get('max')} | "
+        f"{res['bets_per_half_year'].get('periods')} |",
+        "",
         "## Variants (all pre-registered, none cherry-picked)", "",
         "| min_bets/min_z | train bets | train return | test bets | test return | test CI |",
         "|---|---|---|---|---|---|",

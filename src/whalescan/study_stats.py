@@ -88,6 +88,31 @@ def bets_per_week(df: pd.DataFrame, rule_col: str, *, since_week: str | None = N
             "mean": float(np.mean(per))}
 
 
+def bets_per_period(df: pd.DataFrame, rule_col: str, *, period_days: int, since_ts: int | None = None) -> dict[str, Any]:
+    """Qualifying bets per `period_days`-day period (by bet time, resolved or not), anchored to the earliest
+    covered bet (or `since_ts` if given). A rare signal can show many zero WEEKS even when it fires reliably
+    over longer spans — this is the same idea as bets_per_week, generalised to a coarser period (a quarter,
+    half a year) that is more honest about how rare the signal really is. The first and last periods are
+    partial and dropped; periods with no qualifying bet count as zero."""
+    d = df if since_ts is None else df[df["signal_ts"] >= since_ts]
+    if d.empty:
+        return {"periods": 0, "period_days": period_days, "median": None, "min": None, "max": None, "mean": None}
+    period_s = period_days * 86400
+    anchor = int(d["signal_ts"].min())
+    bucket_of = ((d["signal_ts"] - anchor) // period_s).astype(int)
+    # the full span, not just buckets that happen to contain a row: a period with literally no covered bet at
+    # all must still count as a zero period, not vanish silently
+    last_bucket = int(bucket_of.max())
+    periods = list(range(last_bucket + 1))[1:-1]
+    if not periods:
+        return {"periods": 0, "period_days": period_days, "median": None, "min": None, "max": None, "mean": None}
+    qualifying = bucket_of[d[rule_col].astype(bool).to_numpy()]
+    counts = qualifying.value_counts()
+    per = [int(counts.get(p, 0)) for p in periods]
+    return {"periods": len(per), "period_days": period_days, "median": float(np.median(per)), "min": min(per),
+            "max": max(per), "mean": float(np.mean(per))}
+
+
 def _spearman(df: pd.DataFrame, a: str, b: str) -> float | None:
     d = df[[a, b]].dropna()
     if len(d) < 3 or d[a].nunique() < 2 or d[b].nunique() < 2:
