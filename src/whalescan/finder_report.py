@@ -65,7 +65,7 @@ def finder_results(df: pd.DataFrame, cfg: Config) -> dict[str, Any]:
         else f"_informed_{VARIANTS[0][0]}_{VARIANTS[0][1]}"
     # Markets were only loaded because they ENDED within the lookback window, so weeks before that see only
     # long-lived markets and understate the true rate (same trap the evidence study hit) — restrict to covered weeks.
-    covered_from = datetime.fromtimestamp(int(df["signal_ts"].max()) - sc.lookback_days * 86400, UTC).date()
+    covered_from = datetime.fromtimestamp(int(df["signal_ts"].max()) - fc.lookback_days * 86400, UTC).date()
     since_week = (covered_from - timedelta(days=covered_from.weekday())).isoformat() if len(df) else None
     since_ts = int(datetime(covered_from.year, covered_from.month, covered_from.day,
                             tzinfo=UTC).timestamp()) if len(df) else None

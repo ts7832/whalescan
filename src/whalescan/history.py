@@ -110,11 +110,14 @@ async def build_history(apis: Apis, store: HistoryStore, cfg: Config, now: int) 
     rep.markets = len(closed) + len(opened)
     log.info("history: %d studied markets (%d resolved, %d open)", rep.markets, len(closed), len(opened))
 
-    # 1b. Insider Finder: the same listing, widened to any category but sports/price-threshold markets. A market
-    # already registered above (is_news) keeps that status; this only ever adds coverage, never narrows it.
-    cov_closed = [m for m in await apis.gamma.listed_markets(closed=True, end_min_ts=start, end_max_ts=now,
+    # 1b. Insider Finder: the same listing, widened to any category but sports/price-threshold markets, and over
+    # its own (longer) lookback — a separate knob from [study]'s, so extending it never widens the evidence
+    # study's own already-reviewed window. A market already registered above (is_news) keeps that status; this
+    # only ever adds coverage, never narrows it.
+    cov_start = now - cfg.finder.lookback_days * DAY
+    cov_closed = [m for m in await apis.gamma.listed_markets(closed=True, end_min_ts=cov_start, end_max_ts=now,
                                                              min_volume=floor) if is_covered(m, cfg, blocklist)]
-    cov_opened = [m for m in await apis.gamma.listed_markets(closed=False, end_min_ts=start,
+    cov_opened = [m for m in await apis.gamma.listed_markets(closed=False, end_min_ts=cov_start,
                                                              end_max_ts=now + OPEN_HORIZON_S, min_volume=floor)
                  if is_covered(m, cfg, blocklist)]
     store.upsert_markets(cov_closed + cov_opened, now)

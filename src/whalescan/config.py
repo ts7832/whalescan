@@ -166,6 +166,7 @@ class FinderCfg:
     move_fraction_to_one: float
     move_window_h: float
     demote_after: int
+    lookback_days: int
 
 
 @dataclass(frozen=True)

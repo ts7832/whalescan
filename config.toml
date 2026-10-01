@@ -151,6 +151,7 @@ move_points = 0.20
 move_fraction_to_one = 0.5
 move_window_h = 24
 demote_after = 5
+lookback_days = 365            # covered markets, a separate (longer) window from [study]'s own 180 days
 
 [blocklist]
 slug_patterns = ["updown", "up-or-down", "-(5|15)m-"]

@@ -112,3 +112,25 @@ async def test_a_second_run_fetches_no_new_finder_windows(tmp_path):
         n = len(apis.clob.calls)
         await build_history(apis, h, CFG, NOW + HOUR)
     assert len(apis.clob.calls) == n
+
+
+async def test_covered_market_listing_uses_the_finders_own_longer_lookback(tmp_path):
+    # the evidence study's own window must stay exactly as reviewed (180d); the Finder's covered-market listing
+    # needs a full year of history to show real quarterly/biannual cadence numbers — a separate config knob, not
+    # the shared [study].lookback_days, so widening one never silently widens the other.
+    assert CFG.finder.lookback_days > CFG.study.lookback_days
+    apis = world()
+    calls: list[tuple[bool, int, int, float]] = []
+    orig = apis.gamma.listed_markets
+
+    async def recording(*, closed, end_min_ts, end_max_ts, min_volume):
+        calls.append((closed, end_min_ts, end_max_ts, min_volume))
+        return await orig(closed=closed, end_min_ts=end_min_ts, end_max_ts=end_max_ts, min_volume=min_volume)
+
+    apis.gamma.listed_markets = recording
+    with HistoryStore(tmp_path / "h.duckdb") as h:
+        await build_history(apis, h, CFG, NOW)
+
+    closed_starts = {c[1] for c in calls if c[0] is True}
+    assert NOW - CFG.study.lookback_days * DAY in closed_starts
+    assert NOW - CFG.finder.lookback_days * DAY in closed_starts
