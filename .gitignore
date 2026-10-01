@@ -10,6 +10,7 @@ data/scores.parquet
 data/ledger/
 data/history/
 data/archive/
+data/logs/
 web/node_modules/
 web/dist/
 web/public/data/
