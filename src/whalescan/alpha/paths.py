@@ -16,6 +16,7 @@ import logging
 import time
 
 import duckdb
+import httpx
 import pandas as pd
 
 from whalescan.api.clob import ClobApi
@@ -77,8 +78,11 @@ async def fetch(bets_db: str, alpha_db: str, min_usdc: float, limit: int | None)
     if limit:
         todo = todo[:limit]
     log.info("paths: %d assets, %d windows to fetch (%d stored)", len(times), len(todo), len(have))
+    # HTTP/1.1 connection pool on purpose: a single long-lived HTTP/2 connection stalled after CLOB 502s
+    # (measured: < 1 window/s with the process idle in select, vs ~10/s fresh).
     http = HttpClient(user_agent=cfg.http.user_agent, rate_per_s=cfg.http.rate_per_s,
-                      max_retries=cfg.http.max_retries, host_rates=cfg.http.host_rates)
+                      max_retries=cfg.http.max_retries, host_rates=cfg.http.host_rates, timeout_s=20.0,
+                      transport=httpx.AsyncHTTPTransport(limits=httpx.Limits(max_connections=32)))
     clob = ClobApi(http)
     buf: list[tuple[str, int, float]] = []
     done: list[tuple[str, int, int, int]] = []

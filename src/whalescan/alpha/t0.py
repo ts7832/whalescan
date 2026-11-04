@@ -25,7 +25,7 @@ from whalescan.finder import base_rates, moves_frame, qualify
 from whalescan.finder_report import VARIANTS
 from whalescan.history_store import HistoryStore
 from whalescan.study_report import _candidates
-from whalescan.study_stats import rule_summary
+from whalescan.study_stats import rule_summary, wallet_bootstrap_ci
 
 log = logging.getLogger(__name__)
 OUT = Path("data/alpha")
@@ -82,9 +82,13 @@ def track_record() -> list[dict[str, Any]]:
         for p, sel in PERIODS.items():
             s = sel(g)
             r = s[s["return_pct"].notna() & ~s["irregular"].fillna(False).astype(bool)]
+            mean, lo, hi = wallet_bootstrap_ci(r, "return_pct", n=2000, seed=20261104)
             row[p] = {"calls": int(len(s)), "settled": int(len(r)), "wallets": int(r["wallet"].nunique()),
                       "hit_rate": float((r["payout"] == 1.0).mean()) if len(r) else None,
-                      "mean_return": float(r["return_pct"].mean()) if len(r) else None}
+                      "mean_return": mean, "ci_lo": lo, "ci_hi": hi,
+                      "median_return": float(r["return_pct"].median()) if len(r) else None,
+                      "mean_entry": float((r["payout"] / (1 + r["return_pct"])).where(r["payout"] > 0).mean())
+                      if len(r) else None}
         rows.append(row)
     return rows
 
