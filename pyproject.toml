@@ -23,6 +23,11 @@ whalescan = "whalescan.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.3", "pytest-asyncio>=0.24"]
+research = [
+    "scikit-learn>=1.9.1",
+    "scipy>=1.18.1",
+    "statsmodels>=0.15.0",
+]
 
 [tool.scikit-build]
 wheel.packages = ["src/whalescan"]

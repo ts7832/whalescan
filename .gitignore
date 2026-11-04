@@ -16,3 +16,6 @@ web/dist/
 web/public/data/
 .DS_Store
 .superpowers/
+data/backups/
+data/alpha/
+data/config.alpha.toml
