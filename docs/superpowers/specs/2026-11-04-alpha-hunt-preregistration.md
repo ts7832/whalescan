@@ -86,3 +86,22 @@ strategies tried (Bailey & López de Prado). At most **10 finalists** go to NEW.
 
 A strategy additionally needs positive after-cost return in OLD's walk-forward *and* NEW, and a realistic
 frequency (≥ 1 bet a week on average). Nothing found here trades real money before a forward paper period.
+
+## Addendum 1 (2026-11-04, after the first OLD run, before NEW was opened)
+
+Rank correlations against raw per-share edge or per-dollar return are distorted by the 1/0 payoff: their
+distribution's shape depends mechanically on the entry price, so price-correlated features "predict" them without
+any edge (first run: `whale_price` passed BH with IC −0.24 while its favourable quintile lost 2.4¢ per share).
+Fix, applied to T1–T3: targets are standardised by the price-implied standard deviation,
+`z = (outcome − price) / √(price(1 − price))` — mean zero at every price if the market is efficient — and the
+monthly IC is the Pearson correlation between the feature's within-month percentile rank and `z`. The model (T2)
+is trained on `z_copy`. Strategy returns are still reported per dollar and per share, after costs. Nothing about
+NEW was looked at; the holdout and the decision rule are unchanged.
+
+## Addendum 2 (2026-11-04, end of exploration, before NEW was opened)
+
+Added on OLD before freezing: an equal-weight composite of the features that passed BH (signed percentile ranks on
+OLD's distribution), a 65–95¢ range version of the best calibration cell, and the model's market comparison now
+moves the market price by the model's predicted standardised edge. The verdict is computed on **return per dollar**
+after costs (§2's primary); per-share edge is reported beside it and is not a verdict. Finalists are frozen in
+`2026-11-04-alpha-hunt-finalists.json` (this commit).

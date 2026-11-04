@@ -1,0 +1,82 @@
+[
+ {
+  "kind": "quintile",
+  "name": "T1:m_bigvol_before",
+  "feature": "m_bigvol_before",
+  "cuts": [
+   12.679199109320875,
+   14.168914800103183,
+   15.27082142384442,
+   16.28667522301252
+  ],
+  "pick": 4,
+  "sign": 1.0
+ },
+ {
+  "kind": "quintile",
+  "name": "T1:m_age_days",
+  "feature": "m_age_days",
+  "cuts": [
+   2.503702275265295,
+   3.4003311871985735,
+   4.193008596014585,
+   4.804894884894139
+  ],
+  "pick": 4,
+  "sign": 1.0
+ },
+ {
+  "kind": "quintile",
+  "name": "T1:stake_vs_market",
+  "feature": "stake_vs_market",
+  "cuts": [
+   0.0009171220100065996,
+   0.002559777905914489,
+   0.007384099402141757,
+   0.030430045903607338
+  ],
+  "pick": 0,
+  "sign": -1.0
+ },
+ {
+  "kind": "composite",
+  "name": "T1:composite top quintile",
+  "legs": [
+   [
+    "stake_vs_market",
+    -1.0
+   ],
+   [
+    "m_age_days",
+    1.0
+   ],
+   [
+    "m_bigvol_before",
+    1.0
+   ]
+  ],
+  "cut": 0.2515756020613899
+ },
+ {
+  "kind": "model",
+  "name": "T2:model top quintile"
+ },
+ {
+  "kind": "wallet",
+  "name": "T3:prior wallet z top decile",
+  "cut": 2.831705830290459
+ },
+ {
+  "kind": "calibration",
+  "name": "T5:GEOPOLITICS (0.65, 0.8]",
+  "category": "GEOPOLITICS",
+  "bucket": "(0.65, 0.8]"
+ },
+ {
+  "kind": "calibration_range",
+  "name": "T5:GEOPOLITICS 0.65\u20130.95",
+  "category": "GEOPOLITICS",
+  "lo": 0.65,
+  "hi": 0.95
+ }
+]

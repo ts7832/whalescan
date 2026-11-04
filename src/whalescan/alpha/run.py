@@ -26,6 +26,7 @@ from sklearn.metrics import log_loss
 from whalescan.alpha import SPLIT_TS
 from whalescan.alpha.stats import (benjamini_hochberg, bucket, cluster_boot, cluster_boot_spearman, deflated_sharpe,
                                    monthly_ic, newey_west_t, quantile_cuts)
+from whalescan.alpha.stats import monthly_rank_ic
 
 log = logging.getLogger(__name__)
 DAY = 86400
@@ -46,8 +47,11 @@ FEATURES: dict[str, str] = {
     "fresh_cluster": "id", "opp_ratio": "log1p", "m_bigvol_before": "log1p",
     **{f"cat_{c}": "id" for c in CATS},
 }
-TARGETS = ["edge_copy", "ret_copy", "edge_whale", "mo_24h", "mtm_7d"]
-COPY_TARGETS = ("edge_copy", "ret_copy")
+# Standardised targets (addendum 1): result / sqrt(p(1-p)) at the relevant price. Under an efficient price each has
+# mean zero AT EVERY PRICE, so a feature correlated with price cannot score mechanically (raw edge and per-dollar
+# returns of 1/0 payoffs have price-dependent shapes that distort rank correlations).
+TARGETS = ["z_copy", "z_whale", "z_mo24", "z_mtm7"]
+COPY_TARGETS = ("z_copy",)
 
 
 def load(phase_rows: str) -> pd.DataFrame:
@@ -67,6 +71,12 @@ def load(phase_rows: str) -> pd.DataFrame:
         b[f"f_{col}"] = {"id": x, "log1p": np.log1p(x.clip(lower=0)), "log": np.log(x.clip(lower=1e-6)),
                          "log1p0": np.log1p(x.clip(lower=0))}[tr]
     b["in_band"] = b["entry_cost"].between(*PRICE_BAND)
+    sd_c = np.sqrt(b["entry_cost"] * (1 - b["entry_cost"]))
+    sd_w = np.sqrt(b["whale_price"] * (1 - b["whale_price"]))
+    b["z_copy"] = b["edge_copy"] / sd_c
+    b["z_whale"] = b["edge_whale"] / sd_w
+    b["z_mo24"] = b["mo_24h"] / sd_w
+    b["z_mtm7"] = b["mtm_7d"] * b["entry_cost"] / sd_c   # per-dollar mark-to-market back to per share, standardised
     return b
 
 
@@ -81,7 +91,7 @@ def t1(u: pd.DataFrame) -> list[dict[str, Any]]:
     for col in FEATURES:
         f = f"f_{col}"
         for y in TARGETS:
-            ics = monthly_ic(u, f, y)
+            ics = monthly_rank_ic(u, f, y)
             t, p = newey_west_t(ics)
             rows.append({"test": "T1", "feature": col, "target": y, "months": int(len(ics)),
                          "mean_ic": float(ics.mean()) if len(ics) else None, "nw_t": t, "p": p,
@@ -125,7 +135,7 @@ def t2(u: pd.DataFrame) -> dict[str, Any]:
         if len(train) < 2000 or test.empty:
             continue
         X = model_features(train)
-        mdl = _hgb().fit(train[X], train["edge_copy"])
+        mdl = _hgb().fit(train[X], train["z_copy"])
         oof.loc[test.index] = mdl.predict(test[X])
         lr_X = train[X].fillna(0.0).assign(logit_p=np.log(train["entry_cost"] / (1 - train["entry_cost"])))
         lr = LogisticRegression(C=0.1, max_iter=2000).fit(lr_X, train["won"].astype(int))
@@ -137,21 +147,24 @@ def t2(u: pd.DataFrame) -> dict[str, Any]:
              for q, g in d.groupby("pred_q")]
     top = d[d["pred_q"] == 4]
     weekly = top.groupby(pd.to_datetime(top["signal_ts"], unit="s").dt.to_period("W"))["edge_copy"].mean()
-    m = d.dropna(subset=["p_lr"])
-    p_mkt = m["entry_cost"].clip(1e-4, 1 - 1e-4)
-    ll_mkt = log_loss(m["won"].astype(int), p_mkt)
-    ll_lr = log_loss(m["won"].astype(int), m["p_lr"].clip(1e-4, 1 - 1e-4))
+    # Does the model improve on the market's own price? Its prediction is a standardised edge, so the implied
+    # probability is the entry price moved by pred * sd. Compared on resolved out-of-fold bets.
+    m = d[d["won"].notna()]
+    c = m["entry_cost"].clip(1e-4, 1 - 1e-4)
+    p_adj = (c + m["pred"] * np.sqrt(c * (1 - c))).clip(1e-4, 1 - 1e-4)
+    ll_mkt = log_loss(m["won"].astype(int), c)
+    ll_lr = log_loss(m["won"].astype(int), p_adj)
     # importance on the last OOF quarter, from a model trained before it (no look-ahead)
     last = months[-3]
     start = int(pd.Timestamp(last + "-01", tz="UTC").timestamp())
     tr = u[(u["resolved_ts"] < start - EMBARGO_S) & u["edge_copy"].notna()]
     te = u[(u["signal_ts"] >= start) & u["edge_copy"].notna()]
     X = model_features(tr)
-    mdl = _hgb().fit(tr[X], tr["edge_copy"])
-    pi = permutation_importance(mdl, te[X], te["edge_copy"], n_repeats=5, random_state=0)
+    mdl = _hgb().fit(tr[X], tr["z_copy"])
+    pi = permutation_importance(mdl, te[X], te["z_copy"], n_repeats=5, random_state=0)
     imp = sorted(({"feature": X[i][2:], "importance": float(pi.importances_mean[i])} for i in range(len(X))),
                  key=lambda r: -r["importance"])
-    return {"oof_bets": int(len(d)), "oof_ic": cluster_boot_spearman(d, "pred", "edge_copy", n=300),
+    return {"oof_bets": int(len(d)), "oof_ic": cluster_boot_spearman(d, "pred", "z_copy", n=300),
             "quintiles": quint, "top_quintile": cluster_boot(top, "edge_copy"),
             "top_quintile_ret": cluster_boot(top, "ret_copy"), "weekly_top": weekly.to_numpy().tolist(),
             "logloss_market": float(ll_mkt), "logloss_model": float(ll_lr), "beats_market": bool(ll_lr < ll_mkt),
@@ -174,19 +187,26 @@ def t3(b: pd.DataFrame, min_each: int = 5) -> dict[str, Any]:
         first, second = g[g["signal_ts"] < mid], g[g["signal_ts"] >= mid + EMBARGO_S]
         if len(first) < min_each or len(second) < min_each:
             continue
+        def z(h: pd.DataFrame) -> float:
+            v = (h["whale_price"] * (1 - h["whale_price"])).sum()
+            return float(h["e"].sum() / math.sqrt(v)) if v > 0 else 0.0
         rows.append({"wallet": w, "n1": len(first), "n2": len(second), "e1": _shrunk(first["e"].to_numpy()),
-                     "e2": _shrunk(second["e"].to_numpy()), "copy2": second["edge_copy"].mean()})
+                     "e2": _shrunk(second["e"].to_numpy()), "z1": z(first), "z2": z(second),
+                     "copy2": second["edge_copy"].mean(), "copy2_ret": second["ret_copy"].mean()})
     w = pd.DataFrame(rows)
     if len(w) < 20:
         return {"wallets": int(len(w))}
     w["d1"] = pd.qcut(w["e1"].rank(method="first"), 10, labels=False)
     trans = w.groupby("d1").agg(n=("wallet", "size"), e1=("e1", "mean"), e2=("e2", "mean"),
-                                copy2=("copy2", "mean")).reset_index().to_dict("records")
+                                copy2=("copy2", "mean"), copy2_ret=("copy2_ret", "mean")).reset_index().to_dict("records")
     rho = w["e1"].rank().corr(w["e2"].rank())
+    rho_z = w["z1"].rank().corr(w["z2"].rank())
     n = len(w)
     t = rho * math.sqrt((n - 2) / max(1e-12, 1 - rho ** 2))
     from scipy import stats as st
+    tz = rho_z * math.sqrt((n - 2) / max(1e-12, 1 - rho_z ** 2))
     return {"wallets": int(n), "spearman_halves": float(rho), "t": float(t), "p": float(2 * st.t.sf(abs(t), n - 2)),
+            "spearman_halves_z": float(rho_z), "t_z": float(tz), "p_z": float(2 * st.t.sf(abs(tz), n - 2)),
             "deciles": trans}
 
 
@@ -225,7 +245,7 @@ def explore() -> None:
     # quintile strategies for every T1 feature (all evaluated: they count as trials for the deflated Sharpe)
     strategies = []
     for col in FEATURES:
-        ics = next(r for r in t1_rows if r["feature"] == col and r["target"] == "edge_copy")
+        ics = next(r for r in t1_rows if r["feature"] == col and r["target"] == "z_copy")
         sign = 1.0 if (ics["mean_ic"] or 0) >= 0 else -1.0
         qs = quintile_strategy(u, col, sign)
         if qs["pick"] is None:
@@ -264,10 +284,21 @@ def explore() -> None:
     passing = {r["feature"] for r in t1_rows if r["bh_pass"] and r["target"] in COPY_TARGETS}
     ranked = sorted((s for s in strategies if s["feature"] in passing),
                     key=lambda s: -abs(next(r for r in t1_rows if r["feature"] == s["feature"]
-                                            and r["target"] == "edge_copy")["nw_t"] or 0))
+                                            and r["target"] == "z_copy")["nw_t"] or 0))
     for s in ranked[:6]:
         finalists.append({"kind": "quintile", "name": s["name"], "feature": s["feature"], "cuts": s["cuts"],
                           "pick": s["pick"], "sign": s["sign"]})
+    legs = [(r["feature"], 1.0 if r["mean_ic"] > 0 else -1.0) for r in t1_rows
+            if r["bh_pass"] and r["target"] == "z_copy"]
+    if len(legs) >= 2:
+        sc = composite(u, u, legs)
+        cut = float(np.nanquantile(sc, 0.8))
+        sel = u[sc >= cut]
+        res["composite"] = {"legs": legs, "cut": cut, "edge": cluster_boot(sel, "edge_copy"),
+                            "ret": cluster_boot(sel, "ret_copy"),
+                            "quintiles": [{"q": q, "edge": cluster_boot(g, "edge_copy"), "ret": cluster_boot(g, "ret_copy")}
+                                          for q, g in u.groupby(pd.qcut(sc, 5, labels=False))]}
+        finalists.append({"kind": "composite", "name": "T1:composite top quintile", "legs": legs, "cut": cut})
     finalists.append({"kind": "model", "name": "T2:model top quintile"})
     finalists.append({"kind": "wallet", "name": "T3:prior wallet z top decile",
                       "cut": float(np.nanquantile(u.loc[u["w_prior_resolved"] >= 10, "w_prior_z"], 0.9))})
@@ -280,6 +311,9 @@ def explore() -> None:
         c = max(cal, key=lambda r: r["lo"])
         finalists.append({"kind": "calibration", "name": f"T5:{c['category']} {c['bucket']}",
                           "category": c["category"], "bucket": c["bucket"]})
+        # the same category over the whole favourable range around that cell (65–95¢), decided on OLD
+        finalists.append({"kind": "calibration_range", "name": f"T5:{c['category']} 0.65–0.95",
+                          "category": c["category"], "lo": 0.65, "hi": 0.95})
     res["finalists"] = finalists[:MAX_FINALISTS]
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "explore.json").write_text(json.dumps(res, indent=1, default=str))
@@ -288,6 +322,19 @@ def explore() -> None:
 
 
 # ---------------------------------------------------------------- holdout (NEW, finalists only)
+def ecdf_rank(ref: pd.Series, x: pd.Series) -> pd.Series:
+    """Percentile of each x within the REFERENCE (OLD) distribution — so NEW is scored on OLD's scale."""
+    r = np.sort(ref.dropna().to_numpy())
+    out = np.searchsorted(r, x.to_numpy(), side="right") / max(1, len(r))
+    return pd.Series(np.where(x.notna(), out, np.nan), index=x.index)
+
+
+def composite(ref: pd.DataFrame, d: pd.DataFrame, legs: list[tuple[str, float]]) -> pd.Series:
+    """Equal-weight average of signed percentile ranks (each leg's sign from its OLD IC)."""
+    parts = [(ecdf_rank(ref[f"f_{c}"], d[f"f_{c}"]) - 0.5) * sign for c, sign in legs]
+    return pd.concat(parts, axis=1).mean(axis=1, skipna=False)
+
+
 def _verdict(old: dict[str, Any], new: dict[str, Any], n_wallets: int) -> str:
     same = (old.get("mean") or 0) * (new.get("mean") or 0) > 0 and (new.get("mean") or 0) > 0
     if not same:
@@ -307,15 +354,24 @@ def holdout() -> None:
             col = f"f_{f['feature']}"
             sel_old = old[bucket(old[col], f["cuts"]) == f["pick"]]
             sel_new = new[bucket(new[col], f["cuts"]) == f["pick"]]
-            ic_new = cluster_boot_spearman(new, col, "edge_copy", n=300)
+            ic_new = cluster_boot_spearman(new, col, "z_copy", n=300)
+        elif f["kind"] == "composite":
+            legs = [tuple(x) for x in f["legs"]]
+            sel_old = old[composite(old, old, legs) >= f["cut"]]
+            sel_new = new[composite(old, new, legs) >= f["cut"]]
+            ic_new = cluster_boot_spearman(new.assign(sc=composite(old, new, legs)), "sc", "z_copy", n=300)
+        elif f["kind"] == "calibration_range":
+            def rng(d: pd.DataFrame) -> pd.DataFrame:
+                return d[(d["category"] == f["category"]) & (d["entry_cost"] > f["lo"]) & (d["entry_cost"] <= f["hi"])]
+            sel_old, sel_new, ic_new = rng(old), rng(new), None
         elif f["kind"] == "model":
             tr = old[(old["resolved_ts"] < SPLIT_TS - EMBARGO_S) & old["edge_copy"].notna()]
             X = model_features(tr)
-            mdl = _hgb().fit(tr[X], tr["edge_copy"])
+            mdl = _hgb().fit(tr[X], tr["z_copy"])
             cut = float(np.quantile(mdl.predict(old[old["edge_copy"].notna()][X]), 0.8))
             sel_old = old[old["edge_copy"].notna()][mdl.predict(old[old["edge_copy"].notna()][X]) >= cut]
             sel_new = new[mdl.predict(new[X]) >= cut]
-            ic_new = cluster_boot_spearman(new.assign(pred=mdl.predict(new[X])), "pred", "edge_copy", n=300)
+            ic_new = cluster_boot_spearman(new.assign(pred=mdl.predict(new[X])), "pred", "z_copy", n=300)
         elif f["kind"] == "wallet":
             m_old = (old["w_prior_resolved"] >= 10) & (old["w_prior_z"] >= f["cut"])
             m_new = (new["w_prior_resolved"] >= 10) & (new["w_prior_z"] >= f["cut"])
@@ -338,13 +394,15 @@ def holdout() -> None:
                 return d[m & (d["category"] == f["category"])] if f["category"] != "ALL" else d[m]
             sel_old, sel_new, ic_new = pick(old), pick(new), None
         col = "edge_fade" if f["kind"] == "fade" else "edge_copy"
+        rcol = "ret_fade" if f["kind"] == "fade" else "ret_copy"  # the verdict is per dollar (pre-registration §2)
         mtm = "mtm_7d"
         o, n = cluster_boot(sel_old, col), cluster_boot(sel_new, col)
-        row = {"name": f["name"], "old": o, "new": n, "new_ret": cluster_boot(sel_new, "ret_copy"),
+        o_ret, n_ret = cluster_boot(sel_old, rcol), cluster_boot(sel_new, rcol)
+        row = {"name": f["name"], "old": o, "new": n, "old_ret": o_ret, "new_ret": n_ret,
                "new_mtm_7d": cluster_boot(sel_new, mtm) if f["kind"] != "fade" else None,
                "new_ic": ic_new, "new_wallets": int(sel_new.dropna(subset=[col])["wallet"].nunique()),
                "new_bets_all": int(len(sel_new))}
-        row["verdict"] = _verdict(o, n, row["new_wallets"])
+        row["verdict"] = _verdict(o_ret, n_ret, row["new_wallets"])
         out.append(row)
         log.info("holdout %-40s OLD %s NEW %s -> %s", f["name"], o["mean"], n["mean"], row["verdict"])
     (OUT / "holdout.json").write_text(json.dumps(out, indent=1, default=str))

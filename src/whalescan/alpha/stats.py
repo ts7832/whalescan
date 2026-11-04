@@ -73,6 +73,18 @@ def monthly_ic(df: pd.DataFrame, x: str, y: str, *, min_n: int = 50) -> pd.Serie
     return pd.Series(out, dtype=float).sort_index()
 
 
+def monthly_rank_ic(df: pd.DataFrame, x: str, y: str, *, min_n: int = 50) -> pd.Series:
+    """Per calendar month: Pearson correlation between the feature's within-month percentile rank (robust to the
+    feature's outliers and scale drift) and the standardised target itself (whose mean is the economic quantity:
+    ranking it would throw away exactly the magnitude a 1/0 payoff's edge lives in)."""
+    d = df[["month", x, y]].dropna()
+    out = {}
+    for m, g in d.groupby("month"):
+        if len(g) >= min_n and g[x].nunique() > 1 and g[y].std() > 0:
+            out[m] = float(np.corrcoef(g[x].rank(pct=True), g[y])[0, 1])
+    return pd.Series(out, dtype=float).sort_index()
+
+
 def newey_west_t(series: pd.Series, lags: int | None = None) -> tuple[float | None, float | None]:
     """t-stat of the mean of a time series with Newey–West (Bartlett) standard errors, and its two-sided p."""
     x = series.dropna().to_numpy()

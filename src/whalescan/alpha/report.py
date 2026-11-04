@@ -58,19 +58,21 @@ def explore_section(ex: dict[str, Any]) -> list[str]:
     out = ["## Exploration on OLD (walk-forward, multiple-testing corrected)", "",
            f"{u['bets']:,} big news-market buys; {u['copyable']:,} copyable at +15 min inside the 2–95¢ band "
            f"({u['resolved']:,} resolved).", "",
-           "### T1 — single features (monthly rank IC, Newey–West t, Benjamini–Hochberg q = 0.10)", "",
-           "| Feature | IC vs copy edge | t | IC vs whale edge | t | IC vs 24h markout | t | passes BH (copy) |",
-           "|---|---|---|---|---|---|---|---|"]
+           "### T1 — single features (monthly IC: feature rank vs standardised edge; Newey–West t; "
+           "Benjamini–Hochberg q = 0.10 over all tests)", "",
+           "| Feature | IC copy edge | t | IC whale edge | t | IC 24h markout | t | IC 7d mark-to-market | t | BH (copy) |",
+           "|---|---|---|---|---|---|---|---|---|---|"]
     by = {}
     for r in ex["T1"]:
         by.setdefault(r["feature"], {})[r["target"]] = r
     def f(r): return "–" if r is None or r.get("mean_ic") is None else f"{r['mean_ic']:+.3f}"
     def t(r): return "–" if r is None or r.get("nw_t") is None else f"{r['nw_t']:+.1f}"
-    rows = sorted(by.items(), key=lambda kv: -abs((kv[1].get("edge_copy") or {}).get("nw_t") or 0))
+    rows = sorted(by.items(), key=lambda kv: -abs((kv[1].get("z_copy") or {}).get("nw_t") or 0))
     for feat, d in rows:
-        bh = any(d.get(k, {}).get("bh_pass") for k in ("edge_copy", "ret_copy"))
-        out.append(f"| {feat} | {f(d.get('edge_copy'))} | {t(d.get('edge_copy'))} | {f(d.get('edge_whale'))} | "
-                   f"{t(d.get('edge_whale'))} | {f(d.get('mo_24h'))} | {t(d.get('mo_24h'))} | {'**yes**' if bh else 'no'} |")
+        bh = d.get("z_copy", {}).get("bh_pass")
+        out.append(f"| {feat} | {f(d.get('z_copy'))} | {t(d.get('z_copy'))} | {f(d.get('z_whale'))} | "
+                   f"{t(d.get('z_whale'))} | {f(d.get('z_mo24'))} | {t(d.get('z_mo24'))} | {f(d.get('z_mtm7'))} | "
+                   f"{t(d.get('z_mtm7'))} | {'**yes**' if bh else 'no'} |")
     out += ["", "### Quintile strategies (favourable extreme quintile of each feature)", "",
             "| Strategy | bets | edge per share | return per dollar | fade (other side) |", "|---|---|---|---|---|"]
     for s in sorted(ex["T1_strategies"], key=lambda s: -(s["edge"]["mean"] or -9)):
@@ -81,15 +83,24 @@ def explore_section(ex: dict[str, Any]) -> list[str]:
             f"deflated Sharpe probability {dsr.get('dsr') if dsr.get('dsr') is None else round(dsr['dsr'], 3)} "
             f"(weekly Sharpe {dsr.get('sr') and round(dsr['sr'], 3)} vs {dsr.get('sr0') and round(dsr['sr0'], 3)} "
             "expected from the best of the skill-less trials).", ""]
+    if "composite" in ex:
+        c = ex["composite"]
+        out += ["### Composite of the features that passed BH (equal-weight signed percentile ranks)", "",
+                "Legs: " + ", ".join(f"{'+' if s_ > 0 else '−'}{f_}" for f_, s_ in c["legs"]), "",
+                "| Composite quintile | bets | edge per share | return per dollar |", "|---|---|---|---|"]
+        for q in c["quintiles"]:
+            out.append(f"| Q{int(q['q']) + 1} | {q['edge']['n']} | {ci(q['edge'], cents)} | {ci(q['ret'])} |")
+        out.append("")
     t2 = ex["T2"]
     out += ["### T2 — gradient-boosted model, walk-forward (purged, 7-day embargo)", "",
-            f"Out-of-fold bets: {t2['oof_bets']:,}. Rank IC of predictions with copy edge: "
+            f"Out-of-fold bets: {t2['oof_bets']:,}. Rank IC of predictions with standardised copy edge: "
             f"{t2['oof_ic'].get('ic') and round(t2['oof_ic']['ic'], 3)} "
             f"[{t2['oof_ic'].get('lo') and round(t2['oof_ic']['lo'], 3)}, {t2['oof_ic'].get('hi') and round(t2['oof_ic']['hi'], 3)}].", "",
             "| Prediction quintile | bets | edge per share | return per dollar |", "|---|---|---|---|"]
     for q in t2["quintiles"]:
         out.append(f"| Q{q['q'] + 1} | {q['n']} | {ci(q, cents)} | {pct(q['ret'])} |")
-    out += ["", f"Does a model beat the market's own price as a probability? log-loss market "
+    out += ["", f"Does the model improve on the market's own price as a probability (price moved by the model's "
+            f"predicted edge)? log-loss market "
             f"{t2['logloss_market']:.4f} vs model {t2['logloss_model']:.4f} → "
             f"**{'yes' if t2['beats_market'] else 'no'}**.", "",
             "Most important features (permutation importance, last OOF quarter): " +
@@ -99,11 +110,13 @@ def explore_section(ex: dict[str, Any]) -> list[str]:
         out += ["### T3 — does wallet skill persist?", "",
                 f"{t3['wallets']} wallets with ≥ 5 resolved big bets in each half of their own history. Rank correlation "
                 f"of shrunk edge, first half vs second half: **{t3['spearman_halves']:+.3f}** (t = {t3['t']:.1f}, "
-                f"p = {t3['p']:.4f}).", "",
-                "| First-half decile | wallets | first-half edge | second-half edge (whale) | second-half edge (copier) |",
-                "|---|---|---|---|---|"]
+                f"p = {t3['p']:.4f}); standardised (z) version {t3.get('spearman_halves_z', 0):+.3f} "
+                f"(p = {t3.get('p_z', 1):.4f}).", "",
+                "| First-half decile | wallets | first-half edge | second-half edge (whale) | second-half copier per share "
+                "| second-half copier per dollar |", "|---|---|---|---|---|---|"]
         for d in t3["deciles"]:
-            out.append(f"| D{int(d['d1']) + 1} | {d['n']} | {cents(d['e1'])} | {cents(d['e2'])} | {cents(d['copy2'])} |")
+            out.append(f"| D{int(d['d1']) + 1} | {d['n']} | {cents(d['e1'])} | {cents(d['e2'])} | {cents(d['copy2'])} "
+                       f"| {pct(d.get('copy2_ret'))} |")
         out.append("")
     out += ["### T4 — fading the losers", "", "| Faded group | bets | edge per share (other side) |", "|---|---|---|"]
     for f_ in ex["T4"]:
@@ -122,11 +135,12 @@ def explore_section(ex: dict[str, Any]) -> list[str]:
 
 def holdout_section(ho: list[dict[str, Any]]) -> list[str]:
     out = ["## Holdout — NEW (1 Oct → now), finalists only, touched once", "",
-           "| Finalist | OLD edge per share | NEW edge per share | NEW return per dollar | NEW 7-day mark-to-market | "
-           "NEW wallets | Verdict |", "|---|---|---|---|---|---|---|"]
+           "Verdict on return per dollar after costs (pre-registration §2, §4).", "",
+           "| Finalist | OLD per dollar | NEW per dollar | NEW per share | NEW 7-day mark-to-market | NEW bets / wallets "
+           "| Verdict |", "|---|---|---|---|---|---|---|"]
     for r in ho:
-        out.append(f"| {r['name']} | {ci(r['old'], cents)} | {ci(r['new'], cents)} | {ci(r['new_ret'])} | "
-                   f"{ci(r['new_mtm_7d'])} | {r['new_wallets']} | **{r['verdict']}** |")
+        out.append(f"| {r['name']} | {ci(r.get('old_ret'))} | {ci(r['new_ret'])} | {ci(r['new'], cents)} | "
+                   f"{ci(r['new_mtm_7d'])} | {r['new']['n']} / {r['new_wallets']} | **{r['verdict']}** |")
     return out + [""]
 
 
