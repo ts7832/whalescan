@@ -50,6 +50,17 @@ def _side(value: Any) -> str:
     return side
 
 
+def _f(d: dict[str, Any], snake: str, camel: str, default: Any = KeyError) -> Any:
+    """Data API v2 (2026-11) renamed every field to snake_case; accept either spelling."""
+    if d.get(snake) is not None:
+        return d[snake]
+    if d.get(camel) is not None:
+        return d[camel]
+    if default is KeyError:
+        raise KeyError(snake)
+    return default
+
+
 def _guard(kind: str, fn: Callable[[dict[str, Any]], T]) -> Callable[[dict[str, Any]], T]:
     def wrapped(d: dict[str, Any]) -> T:
         try:
@@ -62,54 +73,54 @@ def _guard(kind: str, fn: Callable[[dict[str, Any]], T]) -> Callable[[dict[str, 
 
 def _trade(d: dict[str, Any]) -> Trade:
     return Trade(
-        tx_hash=str(d["transactionHash"]),
+        tx_hash=str(_f(d, "transaction_hash", "transactionHash")),
         ts=int(d["timestamp"]),
-        wallet=str(d["proxyWallet"]).lower(),
-        asset=str(d["asset"]),
-        condition_id=str(d["conditionId"]).lower(),
+        wallet=str(_f(d, "proxy_wallet", "proxyWallet")).lower(),
+        asset=str(_f(d, "token_id", "asset")),
+        condition_id=str(_f(d, "condition_id", "conditionId")).lower(),
         side=_side(d["side"]),
         price=float(d["price"]),
         size=float(d["size"]),
-        event_slug=str(d.get("eventSlug") or ""),
+        event_slug=str(_f(d, "event_slug", "eventSlug", "")),
         title=str(d.get("title") or ""),
         outcome=str(d.get("outcome") or ""),
-        outcome_index=int(d.get("outcomeIndex", -1)),
+        outcome_index=int(_f(d, "outcome_index", "outcomeIndex", -1)),
         fee=float(d["fee"]) if d.get("fee") is not None else None,
     )
 
 
 def _closed_position(d: dict[str, Any]) -> ClosedPosition:
     return ClosedPosition(
-        wallet=str(d["proxyWallet"]).lower(),
-        asset=str(d["asset"]),
-        condition_id=str(d["conditionId"]).lower(),
-        avg_price=float(d["avgPrice"]),
-        total_bought=float(d["totalBought"]),
-        realized_pnl=float(d.get("realizedPnl") or 0.0),
-        cur_price=float(d.get("curPrice") or 0.0),
+        wallet=str(_f(d, "proxy_wallet", "proxyWallet")).lower(),
+        asset=str(_f(d, "token_id", "asset")),
+        condition_id=str(_f(d, "condition_id", "conditionId")).lower(),
+        avg_price=float(_f(d, "avg_price", "avgPrice")),
+        total_bought=float(_f(d, "total_size", "totalBought")),
+        realized_pnl=float(_f(d, "realized_pnl", "realizedPnl", 0.0)),
+        cur_price=float(_f(d, "current_price", "curPrice", 0.0)),
         outcome=str(d.get("outcome") or ""),
-        outcome_index=int(d["outcomeIndex"]),
+        outcome_index=int(_f(d, "outcome_index", "outcomeIndex")),
         title=str(d.get("title") or ""),
-        event_slug=str(d.get("eventSlug") or ""),
-        ts=int(d["timestamp"]),
+        event_slug=str(_f(d, "event_slug", "eventSlug", "")),
+        ts=int(_f(d, "last_event_at", "timestamp")),
     )
 
 
 def _open_position(d: dict[str, Any]) -> ClosedPosition:
-    """A row from /positions. Resolved-but-unredeemed rows (mostly losers, which nobody redeems for $0)
-    never reach /closed-positions, so they are folded into the same history. ts=0: no close time exists."""
+    """A resolved-but-unredeemed position (mostly losers, which nobody redeems for $0). They never reach the closed
+    list, so they are folded into the same history. ts=0: no close time exists."""
     return ClosedPosition(
-        wallet=str(d["proxyWallet"]).lower(),
-        asset=str(d["asset"]),
-        condition_id=str(d["conditionId"]).lower(),
-        avg_price=float(d["avgPrice"]),
-        total_bought=float(d.get("totalBought") or d.get("size") or 0.0),
-        realized_pnl=float(d.get("realizedPnl") or 0.0),
-        cur_price=float(d.get("curPrice") or 0.0),
+        wallet=str(_f(d, "proxy_wallet", "proxyWallet")).lower(),
+        asset=str(_f(d, "token_id", "asset")),
+        condition_id=str(_f(d, "condition_id", "conditionId")).lower(),
+        avg_price=float(_f(d, "avg_price", "avgPrice")),
+        total_bought=float(_f(d, "total_size", "totalBought", None) or d.get("size") or 0.0),
+        realized_pnl=float(_f(d, "realized_pnl", "realizedPnl", 0.0)),
+        cur_price=float(_f(d, "current_price", "curPrice", 0.0)),
         outcome=str(d.get("outcome") or ""),
-        outcome_index=int(d["outcomeIndex"]),
+        outcome_index=int(_f(d, "outcome_index", "outcomeIndex")),
         title=str(d.get("title") or ""),
-        event_slug=str(d.get("eventSlug") or ""),
+        event_slug=str(_f(d, "event_slug", "eventSlug", "")),
         ts=0,
     )
 
@@ -137,11 +148,11 @@ def _market(d: dict[str, Any]) -> Market:
 
 def _leaderboard(d: dict[str, Any]) -> LeaderboardEntry:
     return LeaderboardEntry(
-        wallet=str(d["proxyWallet"]).lower(),
+        wallet=str(_f(d, "user_id", "proxyWallet")).lower(),
         rank=int(d["rank"]),
-        volume=float(d.get("vol") or 0.0),
+        volume=float(_f(d, "volume", "vol", 0.0)),
         pnl=float(d.get("pnl") or 0.0),
-        name=str(d.get("userName") or ""),
+        name=str(_f(d, "user_name", "userName", "")),
     )
 
 

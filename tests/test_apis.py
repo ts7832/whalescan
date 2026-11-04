@@ -17,73 +17,69 @@ def http(handler) -> HttpClient:
 
 
 def pos(i: int, ts: int) -> dict:
-    return {"proxyWallet": "0xw", "asset": str(i), "conditionId": f"0xc{i}", "avgPrice": 0.5, "totalBought": 10,
-            "realizedPnl": 1, "curPrice": 1, "outcome": "Yes", "outcomeIndex": 0, "title": "t", "eventSlug": "e",
-            "timestamp": ts}
+    return {"proxy_wallet": "0xw", "token_id": str(i), "condition_id": f"0xc{i}", "avg_price": 0.5,
+            "total_size": 10, "realized_pnl": 1, "current_price": 1, "outcome": "Yes", "outcome_index": 0,
+            "title": "t", "event_slug": "e", "last_event_at": ts}
 
 
 def trade(i: int, ts: int) -> dict:
-    return {"proxyWallet": "0xw", "side": "BUY", "asset": str(i), "conditionId": "0xc", "size": 100, "price": 0.5,
-            "timestamp": ts, "transactionHash": f"0x{i}", "outcomeIndex": 0}
+    return {"proxy_wallet": "0xw", "side": "BUY", "token_id": str(i), "condition_id": "0xc", "size": 100,
+            "price": 0.5, "timestamp": ts, "transaction_hash": f"0x{i}", "outcome_index": 0}
 
 
-async def test_closed_positions_paginates_by_timestamp_until_short_page():
+def env(rows: list, nxt: str | None) -> dict:
+    """A Data API v2 response: rows in `data`, the next page's cursor in `pagination`."""
+    return {"data": rows, "pagination": {"has_more": nxt is not None, "next_cursor": nxt}}
+
+
+def page_no(request) -> int:
+    """Test cursors are just the next page's number."""
+    return int(request.url.params.get("cursor") or 0)
+
+
+async def test_closed_positions_pages_by_cursor_in_timestamp_order():
     seen = []
 
     def handler(request):
         q = request.url.params
-        seen.append((q["sortBy"], q["sortDirection"], int(q["offset"]), int(q["limit"])))
-        off = int(q["offset"])
-        n = 50 if off < 100 else 7
-        return httpx.Response(200, json=[pos(off + k, 1000 - off - k) for k in range(n)])
+        assert "offset" not in q  # v2 answers 400 to any offset parameter
+        seen.append((request.url.path, q["status"], q["sort_by"], q["sort_direction"], q.get("cursor")))
+        n = page_no(request)
+        rows = [pos(n * 50 + k, 1000 - n * 50 - k) for k in range(50 if n < 2 else 7)]
+        return httpx.Response(200, json=env(rows, str(n + 1) if n < 2 else None))
 
     hist = await DataApi(http(handler)).closed_positions("0xw")
     assert hist.complete and not hist.truncated and len(hist.positions) == 107
-    assert seen == [("TIMESTAMP", "DESC", 0, 50), ("TIMESTAMP", "DESC", 50, 50), ("TIMESTAMP", "DESC", 100, 50)]
-
-
-async def test_closed_positions_offset_cap_keeps_recent_time_window():
-    # Sorted by TIMESTAMP, a history cut off at the API's depth limit is the most recent window:
-    # unbiased with respect to outcomes, so it stays usable (complete) but is marked truncated.
-    def handler(request):
-        if int(request.url.params["offset"]) >= 100:
-            return httpx.Response(400, json={"error": "max historical trades offset of 10000 exceeded"})
-        return httpx.Response(200, json=[pos(k, 5000 - k) for k in range(50)])
-
-    hist = await DataApi(http(handler)).closed_positions("0xw")
-    assert hist.complete and hist.truncated
-    assert len(hist.positions) == 100
-
-
-async def test_closed_positions_refused_on_first_page_is_incomplete():
-    hist = await DataApi(http(lambda r: httpx.Response(
-        400, json={"error": "max historical trades offset of 10000 exceeded"}))).closed_positions("0xw")
-    assert not hist.complete and not hist.truncated and hist.positions == []
+    assert hist.positions[0].ts == 1000  # last_event_at is the position's time
+    assert seen == [("/v2/positions", "CLOSED", "TIMESTAMP", "DESC", None),
+                    ("/v2/positions", "CLOSED", "TIMESTAMP", "DESC", "1"),
+                    ("/v2/positions", "CLOSED", "TIMESTAMP", "DESC", "2")]
 
 
 async def test_closed_positions_error_object_raises_instead_of_truncating():
-    # Only the explicit offset-cap 400 means "history ends here". Any other error body must fail the
-    # fetch, so nothing partial is stored and the next run retries in full.
+    # An error body must fail the fetch, so nothing partial is stored and the next run retries in full.
     def handler(request):
-        if int(request.url.params["offset"]) >= 50:
+        if page_no(request) >= 1:
             return httpx.Response(200, json={"error": "temporary"})
-        return httpx.Response(200, json=[pos(k, 5000 - k) for k in range(50)])
+        return httpx.Response(200, json=env([pos(k, 5000 - k) for k in range(50)], "1"))
 
     with pytest.raises(ApiError, match="error object"):
         await DataApi(http(handler)).closed_positions("0xw")
 
 
-async def test_closed_positions_stops_at_local_offset_cap(monkeypatch):
+async def test_closed_positions_stops_at_local_row_cap(monkeypatch):
+    # Sorted by TIMESTAMP, a capped history is the most recent window: unbiased with respect to outcomes,
+    # so it stays usable (complete) but is marked truncated.
     monkeypatch.setattr(data_api_module, "MAX_OFFSET", 100)
-    hist = await DataApi(http(lambda r: httpx.Response(200, json=[pos(k, 9999) for k in range(50)]))).closed_positions("0xw")
+    hist = await DataApi(http(lambda r: httpx.Response(200, json=env([pos(k, 9999) for k in range(50)],
+                                                                      str(page_no(r) + 1))))).closed_positions("0xw")
     assert hist.complete and hist.truncated
-    assert len(hist.positions) == 150  # offsets 0, 50, 100
+    assert len(hist.positions) == 100
 
 
 async def test_closed_positions_incremental_stops_at_since_ts():
-    pages = {0: [pos(k, 100 - k) for k in range(50)], 50: [pos(50 + k, 50 - k) for k in range(50)]}
-    hist = await DataApi(http(lambda r: httpx.Response(200, json=pages[int(r.url.params["offset"])]))).closed_positions(
-        "0xw", since_ts=80)
+    pages = {0: env([pos(k, 100 - k) for k in range(50)], "1"), 1: env([pos(50 + k, 50 - k) for k in range(50)], None)}
+    hist = await DataApi(http(lambda r: httpx.Response(200, json=pages[page_no(r)]))).closed_positions("0xw", since_ts=80)
     assert hist.complete
     assert [p.ts for p in hist.positions] == list(range(100, 79, -1))
 
@@ -93,23 +89,31 @@ async def test_trades_filters_and_stops_at_since_ts():
 
     def handler(request):
         seen.update(dict(request.url.params))
-        return httpx.Response(200, json=[trade(k, 1000 - k * 10) for k in range(500)])
+        return httpx.Response(200, json=env([trade(k, 1000 - k * 10) for k in range(500)], "1"))
 
     page = await DataApi(http(handler)).trades(min_usdc=5000, since_ts=900)
     assert page.complete
     assert min(t.ts for t in page.trades) >= 900
-    assert seen["filterType"] == "CASH" and seen["filterAmount"] == "5000" and seen["takerOnly"] == "false"
+    assert seen["filter_type"] == "CASH" and seen["filter_amount"] == "5000" and seen["taker_only"] == "false"
+
+
+async def test_trades_parse_v2_fields():
+    page = await DataApi(http(lambda r: httpx.Response(200, json=env([trade(7, 123)], None)))).trades(market="0xc")
+    t = page.trades[0]
+    assert (t.tx_hash, t.ts, t.wallet, t.asset, t.condition_id, t.outcome_index, t.fee) == (
+        "0x7", 123, "0xw", "7", "0xc", 0, None)
 
 
 async def test_leaderboard_pages():
     def handler(request):
-        off = int(request.url.params["offset"])
-        rows = [] if off >= 100 else [{"rank": str(off + k + 1), "proxyWallet": f"0x{off + k}", "vol": 1, "pnl": 1}
-                                      for k in range(50)]
-        return httpx.Response(200, json=rows)
+        n = page_no(request)
+        assert request.url.path == "/v2/leaderboard" and request.url.params["time_period"] == "ALL"
+        rows = [{"rank": n * 50 + k + 1, "user_id": f"0x{n * 50 + k}", "volume": 1, "pnl": 1, "user_name": "u"}
+                for k in range(50)]
+        return httpx.Response(200, json=env(rows, "1" if n == 0 else None))
 
     board = await DataApi(http(handler)).leaderboard(period="ALL", order_by="PNL", pages=5)
-    assert len(board) == 100 and board[0].rank == 1
+    assert len(board) == 100 and board[0].rank == 1 and board[0].wallet == "0x0"
 
 
 async def test_gamma_queries_closed_first_then_open_for_the_rest():
@@ -187,27 +191,23 @@ async def test_redeemable_positions_returns_only_resolved_rows_across_pages():
 
     def handler(request):
         q = request.url.params
-        seen.append((request.url.path, q["user"], q["sizeThreshold"], int(q["offset"])))
-        off = int(q["offset"])
-        n = 500 if off == 0 else 3
-        rows = [dict(pos(off + k, 0), redeemable=(k % 2 == 0), curPrice=0 if k % 2 == 0 else 0.4) for k in range(n)]
-        return httpx.Response(200, json=rows)
+        seen.append((request.url.path, q["user"], q["status"], q.get("cursor")))
+        n = page_no(request)
+        rows = [dict(pos(n * 500 + k, 0), redeemable=(k % 2 == 0)) for k in range(500 if n == 0 else 3)]
+        return httpx.Response(200, json=env(rows, "1" if n == 0 else None))
 
     hist = await DataApi(http(handler)).redeemable_positions("0xw")
     assert hist.complete
     assert len(hist.positions) == 250 + 2
     assert all(p.ts == 0 for p in hist.positions)
-    assert seen == [("/positions", "0xw", "0", 0), ("/positions", "0xw", "0", 500)]
+    assert seen == [("/v2/positions", "0xw", "REDEEMABLE", None), ("/v2/positions", "0xw", "REDEEMABLE", "1")]
 
 
-async def test_truncated_redeemable_positions_are_incomplete():
-    # /positions has no known outcome-neutral order, so a depth-capped fetch is not a trustworthy window.
-    def handler(request):
-        if int(request.url.params["offset"]) >= 500:
-            return httpx.Response(400, json={"error": "max historical trades offset of 10000 exceeded"})
-        return httpx.Response(200, json=[dict(pos(k, 0), redeemable=True, curPrice=0) for k in range(500)])
-
-    hist = await DataApi(http(handler)).redeemable_positions("0xw")
+async def test_capped_redeemable_positions_are_incomplete(monkeypatch):
+    # No known outcome-neutral order, so a capped fetch is not a trustworthy window.
+    monkeypatch.setattr(data_api_module, "MAX_OFFSET", 1000)
+    hist = await DataApi(http(lambda r: httpx.Response(200, json=env(
+        [dict(pos(k, 0), redeemable=True) for k in range(500)], str(page_no(r) + 1))))).redeemable_positions("0xw")
     assert not hist.complete
 
 
@@ -231,8 +231,8 @@ async def test_wallet_profile_combines_creation_time_and_markets_traded():
         if request.url.path == "/public-profile":
             assert request.url.params["address"] == "0xw"
             return httpx.Response(200, json={"createdAt": "2026-09-23T10:00:00.5Z", "proxyWallet": "0xw"})
-        assert request.url.path == "/traded" and request.url.params["user"] == "0xw"
-        return httpx.Response(200, json={"user": "0xw", "traded": 3})
+        assert request.url.path == "/v2/user-stats" and request.url.params["user"] == "0xw"
+        return httpx.Response(200, json={"data": {"proxy_wallet": "0xw", "trades": 3}})
 
     from whalescan.api.profiles import fetch_profile
     h = http(handler)
@@ -245,7 +245,7 @@ async def test_wallet_profile_tolerates_unknown_accounts():
     def handler(request):
         if request.url.path == "/public-profile":
             return httpx.Response(404, json={"error": "profile not found"})
-        return httpx.Response(200, json={"user": "0xw", "traded": 0})
+        return httpx.Response(200, json={"data": {"proxy_wallet": "0xw", "trades": 0}})
 
     from whalescan.api.profiles import fetch_profile
     h = http(handler)
@@ -270,9 +270,11 @@ async def test_trades_can_be_read_per_market_with_the_cash_filter():
 
     def handler(request):
         q = request.url.params
-        seen.append((q.get("market"), q.get("filterAmount"), q.get("user")))
-        off = int(q["offset"])
-        return httpx.Response(200, json=[trade(off + k, 1000 - off - k) for k in range(500 if off == 0 else 3)])
+        assert "market" not in q  # v2 renamed it to `condition` and answers 400 to the old name
+        seen.append((q.get("condition"), q.get("filter_amount"), q.get("user")))
+        n = page_no(request)
+        rows = [trade(n * 500 + k, 1000 - n * 500 - k) for k in range(500 if n == 0 else 3)]
+        return httpx.Response(200, json=env(rows, "1" if n == 0 else None))
 
     page = await DataApi(http(handler)).trades(market="0xc", min_usdc=1000)
     assert page.complete and len(page.trades) == 503
